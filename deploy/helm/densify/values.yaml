@@ -1,0 +1,85 @@
+# Defaults; override per environment with values-staging.yaml / values-prod.yaml.
+imageRegistry: ghcr.io/OWNER   # TODO: GitHub org/user (GHCR)
+imagePullSecrets: []           # e.g. [{name: ghcr-pull}] for private packages
+imageTag: latest               # set by CI: --set imageTag=<git sha>
+
+hosts:
+  app: app.densify.example
+  api: api.densify.example
+
+ingress:
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "25m"    # lab-report data URLs pass through server actions
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"  # /analyze can take 10–60 s
+
+certManager:
+  clusterIssuer: letsencrypt
+  createClusterIssuer: false
+  acmeEmail: ops@densify.example
+
+web:
+  replicas: 2
+  port: 3000
+  resources:
+    requests: { cpu: 500m, memory: 512Mi }
+    limits: { cpu: "1", memory: 1Gi }
+  hpa: { enabled: true, minReplicas: 2, maxReplicas: 6, targetCPU: 70 }
+  pdb: { minAvailable: 1 }
+  env:
+    BETTER_AUTH_URL: https://app.densify.example
+    TRUSTED_ORIGINS: https://app.densify.example
+    INTERNAL_APP_URL: http://127.0.0.1:3000
+    TZ_HEADER_NAME: x-client-timezone
+    S3_REGION: us-ord-1
+    S3_ENDPOINT: https://us-ord-1.linodeobjects.com
+    S3_BUCKET: densify-vault-storage
+    S3_FORCE_PATH_STYLE: "true"
+    S3_PUBLIC_BASE_URL: https://densify-vault-storage.us-ord-1.linodeobjects.com
+    VAULT_PRESIGNED_GET: "false"
+
+api:
+  replicas: 2
+  port: 8000
+  resources:
+    requests: { cpu: 500m, memory: 512Mi }
+    limits: { cpu: "1", memory: 1Gi }
+  hpa: { enabled: true, minReplicas: 2, maxReplicas: 6, targetCPU: 70 }
+  pdb: { minAvailable: 1 }
+  env:
+    # AI stays on AWS Bedrock (team decision: existing AWS credits). Switch to
+    # LLM_PROVIDER=anthropic + claude-sonnet-4-5-20250929 / claude-haiku-4-5-20251001 later.
+    LLM_PROVIDER: bedrock
+    AWS_REGION: us-east-2
+    LLM_VISION_MODEL: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+    LLM_FAST_MODEL: us.amazon.nova-lite-v1:0
+    CORS_ALLOW_ORIGINS: https://app.densify.example
+    S3_REGION: us-ord-1
+    S3_ENDPOINT: https://us-ord-1.linodeobjects.com
+    S3_BUCKET: densify-vault-storage
+    S3_FORCE_PATH_STYLE: "true"
+    EMAIL_SENDER_ADDRESS: densly.official@gmail.com
+    EMAIL_SENDER_NAME: Densify Clinical
+    PGSSLROOTCERT: /etc/densify/pg-ca.crt
+
+migrations:
+  enabled: true
+
+# Secrets. Prefer existingSecret (created from SOPS/sealed-secrets); the inline values
+# below are only rendered when existingSecret is empty. Keys expected in the Secret:
+#   DATABASE_URL, PG_CA_CERT, BETTER_AUTH_SECRET, NEXT_SERVER_ACTIONS_ENCRYPTION_KEY,
+#   S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, ANTHROPIC_API_KEY, BREVO_API_KEY,
+#   INTERNAL_API_SECRET (optional), AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY (Bedrock only)
+existingSecret: ""
+secrets:
+  DATABASE_URL: ""
+  PG_CA_CERT: ""
+  BETTER_AUTH_SECRET: ""
+  NEXT_SERVER_ACTIONS_ENCRYPTION_KEY: ""
+  S3_ACCESS_KEY_ID: ""
+  S3_SECRET_ACCESS_KEY: ""
+  ANTHROPIC_API_KEY: ""
+  BREVO_API_KEY: ""
+  INTERNAL_API_SECRET: ""
+  AWS_ACCESS_KEY_ID: ""
+  AWS_SECRET_ACCESS_KEY: ""

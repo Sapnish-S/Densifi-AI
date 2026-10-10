@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: densify-api
+  labels:
+    {{- include "densify.labels" . | nindent 4 }}
+    app.kubernetes.io/name: densify-api
+spec:
+  replicas: {{ .Values.api.replicas }}
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: densify-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: densify-api
+        app.kubernetes.io/part-of: densify
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+      terminationGracePeriodSeconds: 60   # let in-flight /analyze calls and email tasks finish
+      containers:
+        - name: api
+          image: {{ include "densify.image" (dict "root" . "name" "api") }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.api.port }}
+          env:
+            {{- range $k, $v := .Values.api.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            {{- include "densify.secretEnv" (dict "root" . "keys" (list "DATABASE_URL" "S3_ACCESS_KEY_ID" "S3_SECRET_ACCESS_KEY" "ANTHROPIC_API_KEY" "AWS_ACCESS_KEY_ID" "AWS_SECRET_ACCESS_KEY" "BREVO_API_KEY" "INTERNAL_API_SECRET")) | nindent 12 }}
+          volumeMounts:
+            - name: pg-ca
+              mountPath: /etc/densify
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+      volumes:
+        - name: pg-ca
+          secret:
+            secretName: {{ include "densify.secretName" . }}
+            optional: true
+            items:
+              - key: PG_CA_CERT
+                path: pg-ca.crt
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: densify-api
+  labels:
+    {{- include "densify.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: densify-api
+  ports:
+    - name: http
+      port: {{ .Values.api.port }}
+      targetPort: http

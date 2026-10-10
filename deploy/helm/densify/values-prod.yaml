@@ -1,0 +1,4 @@
+hosts:
+  app: app.densify.example
+  api: api.densify.example
+existingSecret: densify-prod

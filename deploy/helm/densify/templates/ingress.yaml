@@ -1,0 +1,39 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: densify
+  labels:
+    {{- include "densify.labels" . | nindent 4 }}
+  annotations:
+    cert-manager.io/cluster-issuer: {{ .Values.certManager.clusterIssuer }}
+    {{- range $k, $v := .Values.ingress.annotations }}
+    {{ $k }}: {{ $v | quote }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  tls:
+    - hosts:
+        - {{ .Values.hosts.app | quote }}
+        - {{ .Values.hosts.api | quote }}
+      secretName: densify-tls
+  rules:
+    - host: {{ .Values.hosts.app | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: densify-web
+                port:
+                  name: http
+    - host: {{ .Values.hosts.api | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: densify-api
+                port:
+                  name: http

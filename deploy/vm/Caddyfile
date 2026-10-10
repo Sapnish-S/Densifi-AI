@@ -1,0 +1,10 @@
+# Automatic Let's Encrypt certificate for the API hostname (api.<domain> or *.sslip.io).
+{$API_HOSTNAME} {
+	encode gzip
+	reverse_proxy api:8000 {
+		# /analyze can take 10-60 s (two model calls).
+		transport http {
+			read_timeout 120s
+		}
+	}
+}

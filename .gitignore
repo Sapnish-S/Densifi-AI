@@ -1,0 +1,27 @@
+.env
+.env*.local
+!.env.example
+node_modules/
+.next/
+*.tsbuildinfo
+next-env.d.ts
+__pycache__/
+*.pyc
+venv/
+.venv/
+.pytest_cache/
+.terraform/
+*.tfstate
+*.tfstate.*
+tfplan
+e2e/playwright-report/
+e2e/test-results/
+.DS_Store
+
+# Local credentials (never commit)
+*.auto.tfvars
+secrets/
+
+# Vercel CLI link + rendered deploy env
+.vercel/
+deploy/vm/.env

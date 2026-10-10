@@ -1,0 +1,41 @@
+{{- if .Values.migrations.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: densify-migrate-{{ .Release.Revision }}
+  labels:
+    {{- include "densify.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 300
+  template:
+    spec:
+      restartPolicy: Never
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: migrate
+          image: {{ include "densify.image" (dict "root" . "name" "migrate") }}
+          env:
+            - name: PGSSLROOTCERT
+              value: /etc/densify/pg-ca.crt
+            {{- include "densify.secretEnv" (dict "root" . "keys" (list "DATABASE_URL")) | nindent 12 }}
+          volumeMounts:
+            - name: pg-ca
+              mountPath: /etc/densify
+              readOnly: true
+      volumes:
+        - name: pg-ca
+          secret:
+            secretName: {{ include "densify.secretName" . }}
+            optional: true
+            items:
+              - key: PG_CA_CERT
+                path: pg-ca.crt
+{{- end }}

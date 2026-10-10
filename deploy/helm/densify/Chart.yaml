@@ -1,0 +1,6 @@
+apiVersion: v2
+name: densify
+description: Densify web (Next.js) + api (FastAPI) on Akamai LKE
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

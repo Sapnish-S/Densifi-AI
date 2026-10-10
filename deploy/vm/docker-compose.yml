@@ -1,0 +1,46 @@
+# Densify API host (Linode VM). Rendered .env + pg-ca.crt are written by deploy.sh.
+#   docker compose --profile migrate run --rm migrate   # apply db/migrations
+#   docker compose up -d --build                        # api + Caddy (automatic HTTPS)
+name: densify
+
+services:
+  api:
+    build: ./backend
+    env_file: .env
+    environment:
+      PGSSLROOTCERT: /etc/densify/pg-ca.crt
+    volumes:
+      - ./pg-ca.crt:/etc/densify/pg-ca.crt:ro
+    restart: unless-stopped
+    expose:
+      - "8000"
+
+  caddy:
+    image: caddy:2.8.4
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      API_HOSTNAME: ${API_HOSTNAME:?set by deploy.sh}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+  migrate:
+    image: postgres:16
+    profiles: ["migrate"]
+    env_file: .env
+    environment:
+      PGSSLROOTCERT: /etc/densify/pg-ca.crt
+    volumes:
+      - ./db:/db:ro
+      - ./pg-ca.crt:/etc/densify/pg-ca.crt:ro
+    entrypoint: ["sh", "/db/migrate.sh"]
+
+volumes:
+  caddy_data:
+  caddy_config:

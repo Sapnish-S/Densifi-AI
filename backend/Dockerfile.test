@@ -1,0 +1,6 @@
+# Test runner image: same Python/deps as the runtime + pytest. Code is bind-mounted.
+FROM python:3.13-slim
+WORKDIR /app
+COPY requirements.txt requirements-test.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-test.txt
+CMD ["pytest"]

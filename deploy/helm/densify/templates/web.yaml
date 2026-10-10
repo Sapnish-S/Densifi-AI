@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: densify-web
+  labels:
+    {{- include "densify.labels" . | nindent 4 }}
+    app.kubernetes.io/name: densify-web
+spec:
+  replicas: {{ .Values.web.replicas }}
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0   # zero-downtime rollout
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: densify-web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: densify-web
+        app.kubernetes.io/part-of: densify
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: web
+          image: {{ include "densify.image" (dict "root" . "name" "web") }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.web.port }}
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: API_INTERNAL_URL
+              value: "http://densify-api:{{ .Values.api.port }}"
+            {{- range $k, $v := .Values.web.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            {{- include "densify.secretEnv" (dict "root" . "keys" (list "DATABASE_URL" "PG_CA_CERT" "BETTER_AUTH_SECRET" "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY" "S3_ACCESS_KEY_ID" "S3_SECRET_ACCESS_KEY" "INTERNAL_API_SECRET")) | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /api/healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/healthz
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+          resources:
+            {{- toYaml .Values.web.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: densify-web
+  labels:
+    {{- include "densify.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: densify-web
+  ports:
+    - name: http
+      port: {{ .Values.web.port }}
+      targetPort: http

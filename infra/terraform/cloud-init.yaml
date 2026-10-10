@@ -1,0 +1,13 @@
+#cloud-config
+# Densify API host: Docker Engine + Compose plugin, unattended security updates.
+package_update: true
+package_upgrade: true
+packages:
+  - ca-certificates
+  - curl
+  - unattended-upgrades
+runcmd:
+  - curl -fsSL https://get.docker.com | sh
+  - systemctl enable --now docker
+  - mkdir -p /opt/densify
+  - touch /var/lib/cloud/densify-ready

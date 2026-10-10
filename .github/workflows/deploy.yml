@@ -1,0 +1,138 @@
+name: Deploy
+
+# staging: every push to main. prod: version tags, gated by the `prod` GitHub
+# Environment (required reviewers = manual approval).
+# Kubernetes (deployment_mode = "lke") path only — run manually. The hackathon setup
+# deploys the API with deploy/vm/deploy.sh and the frontend through Vercel's Git import.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options: [staging, prod]
+        default: staging
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io/${{ github.repository_owner }}
+
+jobs:
+  target:
+    runs-on: ubuntu-latest
+    outputs:
+      env: ${{ steps.pick.outputs.env }}
+    steps:
+      - id: pick
+        run: |
+          echo "env=${{ inputs.environment }}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: target
+    runs-on: ubuntu-latest
+    environment: ${{ needs.target.outputs.env }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: api image
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          push: true
+          tags: ${{ env.REGISTRY }}/densify-api:${{ github.sha }}
+      - name: migrate image
+        uses: docker/build-push-action@v6
+        with:
+          context: db
+          push: true
+          tags: ${{ env.REGISTRY }}/densify-migrate:${{ github.sha }}
+      # NEXT_PUBLIC_* are inlined at build time → one web image per environment.
+      - name: web image
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          push: true
+          tags: ${{ env.REGISTRY }}/densify-web:${{ github.sha }}
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}
+            NEXT_PUBLIC_APP_URL=${{ vars.NEXT_PUBLIC_APP_URL }}
+            NEXT_PUBLIC_S3_PUBLIC_BASE_URL=${{ vars.NEXT_PUBLIC_S3_PUBLIC_BASE_URL }}
+            NEXT_PUBLIC_VAPID_PUBLIC_KEY=${{ vars.NEXT_PUBLIC_VAPID_PUBLIC_KEY }}
+            NEXT_PUBLIC_UMAMI_SRC=${{ vars.NEXT_PUBLIC_UMAMI_SRC }}
+            NEXT_PUBLIC_UMAMI_WEBSITE_ID=${{ vars.NEXT_PUBLIC_UMAMI_WEBSITE_ID }}
+
+  infra:
+    needs: target
+    runs-on: ubuntu-latest
+    environment: ${{ needs.target.outputs.env }}
+    defaults:
+      run:
+        working-directory: infra/terraform
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.OBJ_ADMIN_ACCESS_KEY }}        # state backend (Akamai OBJ)
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.OBJ_ADMIN_SECRET_KEY }}
+      TF_VAR_linode_token: ${{ secrets.LINODE_TOKEN }}
+      TF_VAR_obj_admin_access_key: ${{ secrets.OBJ_ADMIN_ACCESS_KEY }}
+      TF_VAR_obj_admin_secret_key: ${{ secrets.OBJ_ADMIN_SECRET_KEY }}
+      TF_VAR_ingress_ipv4: ${{ vars.INGRESS_IPV4 }}
+      TF_VAR_cdn_edge_hostname: ${{ vars.CDN_EDGE_HOSTNAME }}
+      ENV_NAME: ${{ needs.target.outputs.env }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+      - run: terraform init -input=false -backend-config="envs/${ENV_NAME}.backend.hcl"
+      - run: terraform plan -input=false -var-file="envs/${ENV_NAME}.tfvars" -out=tfplan
+      # prod reaches this step only after the `prod` Environment approval.
+      - run: terraform apply -input=false tfplan
+
+  release:
+    needs: [target, build, infra]
+    runs-on: ubuntu-latest
+    environment: ${{ needs.target.outputs.env }}
+    env:
+      ENV_NAME: ${{ needs.target.outputs.env }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+      - uses: azure/setup-kubectl@v4
+      - name: Kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG_B64 }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+      # Migrations run as a pre-upgrade hook Job (densify-migrate image).
+      - name: helm upgrade
+        run: |
+          helm upgrade --install densify deploy/helm/densify \
+            --namespace densify --create-namespace \
+            -f "deploy/helm/densify/values-${ENV_NAME}.yaml" \
+            --set imageRegistry=ghcr.io/${{ github.repository_owner }} \
+            --set imageTag=${{ github.sha }} \
+            --atomic --wait --timeout 10m
+      - name: Smoke test
+        env:
+          APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL }}
+          API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
+          SMOKE_EMAIL: ${{ secrets.SMOKE_TEST_EMAIL }}
+          SMOKE_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
+        run: |
+          set -e
+          curl -fsS "$API_URL/health"
+          curl -fsS -o /dev/null "$APP_URL/landing"
+          if [ -n "$SMOKE_EMAIL" ]; then
+            curl -fsS -X POST "$API_URL/api/auth/login" -H 'Content-Type: application/json' \
+              -d "{\"email\":\"$SMOKE_EMAIL\",\"password\":\"$SMOKE_PASSWORD\"}"
+            curl -fsS -X POST "$APP_URL/api/auth/sign-in/email" -H 'Content-Type: application/json' \
+              -H "Origin: $APP_URL" -d "{\"email\":\"$SMOKE_EMAIL\",\"password\":\"$SMOKE_PASSWORD\"}" -o /dev/null
+          fi

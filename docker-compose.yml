@@ -1,0 +1,169 @@
+# Local development stack: PostgreSQL 16 + SeaweedFS S3 (stand-in for Akamai
+# Object Storage) + migrations + FastAPI + Next.js.
+#   cp .env.example .env   # optional: real ANTHROPIC_API_KEY / BREVO_API_KEY
+#   docker compose up --build
+# Web: http://localhost:3000   API: http://localhost:8000   S3: http://localhost:9000
+#
+# Postgres publishes no host port on purpose: like the Managed DB on LKE it is only
+# reachable from containers on the compose network.
+
+name: densify
+
+x-db-url: &db-url postgresql://densify:densify@db:5432/densify
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: densify
+      POSTGRES_PASSWORD: densify
+      POSTGRES_DB: densify
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U densify -d densify"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    image: postgres:16
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: *db-url
+    volumes:
+      - ./db:/db:ro
+    entrypoint: ["sh", "/db/migrate.sh"]
+    restart: "no"
+
+  # S3-compatible stand-in for Akamai Object Storage. MinIO community images are no
+  # longer published; SeaweedFS's S3 gateway supports SigV4 presigned PUT and
+  # anonymous read, which is all the vault needs.
+  s3:
+    image: chrislusf/seaweedfs:4.48
+    command: server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -s3.allowedOrigins=*
+    ports:
+      - "9000:8333"
+    volumes:
+      - s3data:/data
+      - ./deploy/local/seaweedfs-s3.json:/etc/seaweedfs/s3.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8333/healthz || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  s3-init:
+    image: amazon/aws-cli:2.27.0
+    depends_on:
+      s3:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: densify-local
+      AWS_SECRET_ACCESS_KEY: densify-local-secret
+      AWS_DEFAULT_REGION: us-ord-1
+    # Public-read is granted by the anonymous identity.
+    entrypoint: ["sh", "-c", "aws --endpoint-url http://s3:8333 s3api head-bucket --bucket densify-vault-storage 2>/dev/null || aws --endpoint-url http://s3:8333 s3 mb s3://densify-vault-storage"]
+    restart: "no"
+
+  api:
+    build: ./backend
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      s3-init:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: *db-url
+      S3_ENDPOINT: http://s3:8333
+      S3_REGION: us-ord-1
+      S3_BUCKET: densify-vault-storage
+      S3_ACCESS_KEY_ID: densify-local
+      S3_SECRET_ACCESS_KEY: densify-local-secret
+      S3_FORCE_PATH_STYLE: "true"
+      LLM_PROVIDER: ${LLM_PROVIDER:-mock}   # mock = deterministic local/E2E; set anthropic + key in .env for real AI
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      LLM_VISION_MODEL: claude-sonnet-4-5-20250929
+      LLM_FAST_MODEL: claude-haiku-4-5-20251001
+      BREVO_API_KEY: ${BREVO_API_KEY:-}
+      CORS_ALLOW_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-}
+    ports:
+      - "8000:8000"
+
+  web:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+        NEXT_PUBLIC_APP_URL: http://localhost:3000
+        NEXT_PUBLIC_S3_PUBLIC_BASE_URL: http://localhost:9000/densify-vault-storage
+        # Local-only public key (nothing sends pushes, so no private key is kept).
+        NEXT_PUBLIC_VAPID_PUBLIC_KEY: ${NEXT_PUBLIC_VAPID_PUBLIC_KEY:-BGjBpdwMv6EVVogFahtW6HBfXyrAMNw8yrz5G0ZQzwInjmawwZA0HPovl0Tus1AoJUvEUAReEe0aTES6ql3r27E}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      api:
+        condition: service_started
+    environment:
+      DATABASE_URL: *db-url
+      PG_SSL: disable
+      BETTER_AUTH_URL: http://localhost:3000
+      # Local-only placeholder; real environments inject this from a Kubernetes Secret.
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-local-dev-only-not-a-secret-000000000000}
+      TRUSTED_ORIGINS: http://127.0.0.1:3000
+      INTERNAL_APP_URL: http://127.0.0.1:3000
+      API_INTERNAL_URL: http://api:8000
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-}
+      S3_ENDPOINT: http://s3:8333
+      S3_PUBLIC_ENDPOINT: http://localhost:9000
+      S3_REGION: us-ord-1
+      S3_BUCKET: densify-vault-storage
+      S3_ACCESS_KEY_ID: densify-local
+      S3_SECRET_ACCESS_KEY: densify-local-secret
+      S3_FORCE_PATH_STYLE: "true"
+      S3_PUBLIC_BASE_URL: http://localhost:9000/densify-vault-storage
+      TZ_HEADER_NAME: x-client-timezone
+      AUTH_RATE_LIMIT: disabled      # local/E2E only (Better Auth default limiter stays on elsewhere)
+    ports:
+      - "3000:3000"
+
+  # Backend tests: `docker compose --profile test run --rm api-test`
+  api-test:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.test
+    profiles: ["test"]
+    depends_on:
+      db:
+        condition: service_healthy
+    working_dir: /app
+    environment:
+      TEST_ADMIN_DATABASE_URL: postgresql://densify:densify@db:5432/densify
+    volumes:
+      - ./backend:/app
+      - ./db:/db:ro
+
+  # Playwright E2E: `docker compose --profile e2e run --rm e2e [playwright args]`
+  e2e:
+    image: mcr.microsoft.com/playwright:v1.56.1-noble
+    profiles: ["e2e"]
+    depends_on:
+      web:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    working_dir: /e2e
+    environment:
+      CI: "1"
+      E2E_DATABASE_URL: postgresql://densify:densify@db:5432/densify
+    volumes:
+      - ./e2e:/e2e
+      - /e2e/node_modules   # per-run anonymous volume: parallel runs don't race on npm ci
+    entrypoint: ["sh", "/e2e/run-in-docker.sh"]
+
+volumes:
+  pgdata:
+  s3data:
