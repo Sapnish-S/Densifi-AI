@@ -15,7 +15,7 @@ variable "linode_token" {
 
 variable "obj_region" {
   type    = string
-  default = "us-ord-1"
+  default = "us-ord"
 }
 
 provider "linode" {

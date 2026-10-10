@@ -2,7 +2,7 @@
 Test fixtures for the Densify Core Engine.
 
 These run against a real PostgreSQL 16 (an isolated
-`densify_test` database created from db/migrations) with the LLM and object storage
+`densify_test` database created from db/schema) with the LLM and object storage
 mocked, so they are deterministic and run in CI.
 
 Env:
@@ -22,9 +22,9 @@ import pytest
 
 ADMIN_URL = os.getenv("TEST_ADMIN_DATABASE_URL") or os.getenv("DATABASE_URL") or "postgresql://densify:densify@db:5432/densify"
 TEST_DB = "densify_test"
-MIGRATIONS = pathlib.Path(__file__).resolve().parents[2] / "db" / "migrations"
-if not MIGRATIONS.exists():  # bind-mounted layout inside the test container
-    MIGRATIONS = pathlib.Path("/db/migrations")
+SCHEMA_DIR = pathlib.Path(__file__).resolve().parents[2] / "db" / "schema"
+if not SCHEMA_DIR.exists():  # bind-mounted layout inside the test container
+    SCHEMA_DIR = pathlib.Path("/db/schema")
 
 
 def _with_db(url: str, dbname: str) -> str:
@@ -45,7 +45,7 @@ def _bootstrap_test_db() -> None:
     conn = psycopg2.connect(TEST_URL)
     conn.autocommit = True
     with conn.cursor() as cur:
-        for sql_file in sorted(MIGRATIONS.glob("*.sql")):
+        for sql_file in sorted(SCHEMA_DIR.glob("*.sql")):
             cur.execute(sql_file.read_text(encoding="utf-8"))
     conn.close()
 

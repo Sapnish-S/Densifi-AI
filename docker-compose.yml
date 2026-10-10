@@ -1,5 +1,5 @@
 # Local development stack: PostgreSQL 16 + SeaweedFS S3 (stand-in for Akamai
-# Object Storage) + migrations + FastAPI + Next.js.
+# Object Storage) + schema setup + FastAPI + Next.js.
 #   cp .env.example .env   # optional: real ANTHROPIC_API_KEY / BREVO_API_KEY
 #   docker compose up --build
 # Web: http://localhost:3000   API: http://localhost:8000   S3: http://localhost:9000
@@ -26,7 +26,7 @@ services:
       timeout: 3s
       retries: 20
 
-  migrate:
+  schema:
     image: postgres:16
     depends_on:
       db:
@@ -35,7 +35,7 @@ services:
       DATABASE_URL: *db-url
     volumes:
       - ./db:/db:ro
-    entrypoint: ["sh", "/db/migrate.sh"]
+    entrypoint: ["sh", "/db/apply-schema.sh"]
     restart: "no"
 
   # S3-compatible stand-in for Akamai Object Storage. MinIO community images are no
@@ -63,7 +63,7 @@ services:
     environment:
       AWS_ACCESS_KEY_ID: densify-local
       AWS_SECRET_ACCESS_KEY: densify-local-secret
-      AWS_DEFAULT_REGION: us-ord-1
+      AWS_DEFAULT_REGION: us-ord
     # Public-read is granted by the anonymous identity.
     entrypoint: ["sh", "-c", "aws --endpoint-url http://s3:8333 s3api head-bucket --bucket densify-vault-storage 2>/dev/null || aws --endpoint-url http://s3:8333 s3 mb s3://densify-vault-storage"]
     restart: "no"
@@ -71,14 +71,14 @@ services:
   api:
     build: ./backend
     depends_on:
-      migrate:
+      schema:
         condition: service_completed_successfully
       s3-init:
         condition: service_completed_successfully
     environment:
       DATABASE_URL: *db-url
       S3_ENDPOINT: http://s3:8333
-      S3_REGION: us-ord-1
+      S3_REGION: us-ord
       S3_BUCKET: densify-vault-storage
       S3_ACCESS_KEY_ID: densify-local
       S3_SECRET_ACCESS_KEY: densify-local-secret
@@ -103,7 +103,7 @@ services:
         # Local-only public key (nothing sends pushes, so no private key is kept).
         NEXT_PUBLIC_VAPID_PUBLIC_KEY: ${NEXT_PUBLIC_VAPID_PUBLIC_KEY:-BGjBpdwMv6EVVogFahtW6HBfXyrAMNw8yrz5G0ZQzwInjmawwZA0HPovl0Tus1AoJUvEUAReEe0aTES6ql3r27E}
     depends_on:
-      migrate:
+      schema:
         condition: service_completed_successfully
       api:
         condition: service_started
@@ -119,7 +119,7 @@ services:
       INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-}
       S3_ENDPOINT: http://s3:8333
       S3_PUBLIC_ENDPOINT: http://localhost:9000
-      S3_REGION: us-ord-1
+      S3_REGION: us-ord
       S3_BUCKET: densify-vault-storage
       S3_ACCESS_KEY_ID: densify-local
       S3_SECRET_ACCESS_KEY: densify-local-secret

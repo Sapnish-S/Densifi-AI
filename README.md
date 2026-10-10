@@ -12,7 +12,7 @@ Densify runs on **Akamai Cloud**, with the web app on Vercel.
 |---|---|---|
 | Web app (Next.js 16.2.6, React 19, Better Auth) | **Vercel** (Git import of this repo, root `frontend/`) | `frontend/` |
 | API "Densify Core Engine" (FastAPI) | **Akamai Linode VM** — Docker Compose + Caddy (auto-HTTPS) behind a Cloud Firewall | `backend/`, `deploy/vm/` |
-| Database | **Akamai Managed PostgreSQL 16** | `db/migrations/0001_init.sql` |
+| Database | **Akamai Managed PostgreSQL 16** | `db/schema/0001_init.sql` |
 | Vault photos | **Akamai Object Storage** (S3-compatible, public-read objects) | `frontend/lib/s3.ts` |
 | Network, DNS | **Akamai VPC, Cloud Firewall, DNS Manager** | `infra/terraform/` |
 | AI | **AWS Bedrock** (Claude Sonnet 4.5 vision/OCR, Nova Lite formatter/chat) via `backend/llm_provider.py`; Anthropic API adapter also available | `backend/analyzer.py` |
@@ -24,7 +24,7 @@ A Kubernetes path is kept for scale-up: `deployment_mode = "lke"` in Terraform p
 ```
 frontend/   Next.js app
 backend/    FastAPI service, pytest suite (tests/), Dockerfile
-db/         SQL migrations + migrate.sh (+ Dockerfile for the k8s migration Job)
+db/         SQL schema files + apply-schema.sh (+ Dockerfile for the k8s schema Job)
 e2e/        Playwright end-to-end suite (runs in the official Playwright container)
 infra/      Terraform (linode/linode): VPC, Linode VM or LKE, Managed PostgreSQL, Object Storage, firewall, DNS
 deploy/     provision.sh, vm/ (API host), vercel/ (env generator), helm/ (LKE path), local/ (dev S3 config)
@@ -36,7 +36,7 @@ Requirements: Docker Desktop (nothing else — Node, Python, Terraform and Playw
 
 ```bash
 cp .env.example .env            # optional: real keys; defaults work offline
-docker compose up --build       # postgres:16, S3 (SeaweedFS), migrations, api, web
+docker compose up --build       # postgres:16, S3 (SeaweedFS), schema, api, web
 ```
 
 - Web: http://localhost:3000 · API: http://localhost:8000 (docs at `/docs`) · S3: http://localhost:9000
@@ -66,7 +66,7 @@ deploy/provision.sh bootstrap          # once: Terraform state bucket
 DOMAIN=densify.tech deploy/provision.sh plan          # review resources + cost
 DOMAIN=densify.tech deploy/provision.sh apply --yes   # VM, firewall, DB, bucket, DNS (billable)
 
-VERCEL_ORIGINS=https://densify-ai.vercel.app deploy/vm/deploy.sh   # API: upload, migrate, start, smoke test
+VERCEL_ORIGINS=https://densify-ai.vercel.app deploy/vm/deploy.sh   # API: upload, apply schema, start, smoke test
 
 deploy/vercel/render-env.sh            # writes secrets/vercel.env
 ```

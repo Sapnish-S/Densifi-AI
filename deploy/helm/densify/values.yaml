@@ -31,11 +31,11 @@ web:
     TRUSTED_ORIGINS: https://app.densify.example
     INTERNAL_APP_URL: http://127.0.0.1:3000
     TZ_HEADER_NAME: x-client-timezone
-    S3_REGION: us-ord-1
-    S3_ENDPOINT: https://us-ord-1.linodeobjects.com
+    S3_REGION: us-ord
+    S3_ENDPOINT: https://us-ord-10.linodeobjects.com
     S3_BUCKET: densify-vault-storage
     S3_FORCE_PATH_STYLE: "true"
-    S3_PUBLIC_BASE_URL: https://densify-vault-storage.us-ord-1.linodeobjects.com
+    S3_PUBLIC_BASE_URL: https://densify-vault-storage.us-ord-10.linodeobjects.com
     VAULT_PRESIGNED_GET: "false"
 
 api:
@@ -54,15 +54,15 @@ api:
     LLM_VISION_MODEL: us.anthropic.claude-sonnet-4-5-20250929-v1:0
     LLM_FAST_MODEL: us.amazon.nova-lite-v1:0
     CORS_ALLOW_ORIGINS: https://app.densify.example
-    S3_REGION: us-ord-1
-    S3_ENDPOINT: https://us-ord-1.linodeobjects.com
+    S3_REGION: us-ord
+    S3_ENDPOINT: https://us-ord-10.linodeobjects.com
     S3_BUCKET: densify-vault-storage
     S3_FORCE_PATH_STYLE: "true"
-    EMAIL_SENDER_ADDRESS: densly.official@gmail.com
+    EMAIL_SENDER_ADDRESS: densifyai@gmail.com
     EMAIL_SENDER_NAME: Densify Clinical
     PGSSLROOTCERT: /etc/densify/pg-ca.crt
 
-migrations:
+schema:
   enabled: true
 
 # Secrets. Prefer existingSecret (created from SOPS/sealed-secrets); the inline values

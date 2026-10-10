@@ -37,12 +37,12 @@ output "vault_bucket" {
 }
 
 output "s3_endpoint" {
-  value = "https://${var.obj_region}.linodeobjects.com"
+  value = "https://${var.obj_endpoint}"
 }
 
 output "s3_public_base_url" {
-  description = "→ S3_PUBLIC_BASE_URL / NEXT_PUBLIC_S3_PUBLIC_BASE_URL. TODO(🔎 VERIFY) virtual-host URL format."
-  value       = "https://${linode_object_storage_bucket.vault.label}.${var.obj_region}.linodeobjects.com"
+  description = "→ S3_PUBLIC_BASE_URL / NEXT_PUBLIC_S3_PUBLIC_BASE_URL."
+  value       = "https://${linode_object_storage_bucket.vault.label}.${var.obj_endpoint}"
 }
 
 output "s3_app_access_key" {

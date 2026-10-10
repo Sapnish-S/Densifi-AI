@@ -7,7 +7,7 @@ const BUCKET_NAME = process.env.S3_BUCKET!
 /** Shared client options — exported so route handlers build identical clients. */
 export function s3ClientConfig() {
   return {
-    region: process.env.S3_REGION || "us-ord-1",
+    region: process.env.S3_REGION || "us-ord",
     endpoint: process.env.S3_ENDPOINT || undefined,
     forcePathStyle: (process.env.S3_FORCE_PATH_STYLE ?? "true") === "true",
     // AWS SDK v3 ≥3.729 signs a CRC32 of an *empty* body into presigned PUT URLs by
@@ -59,6 +59,6 @@ export function getS3Url(key: string): string {
   const base =
     process.env.NEXT_PUBLIC_S3_PUBLIC_BASE_URL ||
     process.env.S3_PUBLIC_BASE_URL ||
-    "https://densify-vault-storage.us-ord-1.linodeobjects.com"
+    "https://densify-vault-storage.us-ord-10.linodeobjects.com"
   return `${base.replace(/\/+$/, "")}/${key}`
 }

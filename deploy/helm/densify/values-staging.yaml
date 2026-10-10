@@ -9,7 +9,7 @@ web:
     BETTER_AUTH_URL: https://app-staging.densify.example
     TRUSTED_ORIGINS: https://app-staging.densify.example
     S3_BUCKET: densify-vault-storage-staging
-    S3_PUBLIC_BASE_URL: https://densify-vault-storage-staging.us-ord-1.linodeobjects.com
+    S3_PUBLIC_BASE_URL: https://densify-vault-storage-staging.us-ord-10.linodeobjects.com
 api:
   replicas: 1
   hpa: { enabled: true, minReplicas: 1, maxReplicas: 3, targetCPU: 70 }
