@@ -25,6 +25,7 @@ export default async function DensifyPage() {
     <DashboardClient
       user={{ id: session.user.id, name: session.user.name, email: session.user.email }}
       tier={profile.tier}
+      gender={profile.gender}
       lastSeenAt={notifPrefs.lastSeenAt}
       hasCompletedOnboarding={notifPrefs.hasCompletedOnboarding}
     />

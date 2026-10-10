@@ -81,7 +81,15 @@ function MonthFolder({ vault, isOpen, onToggle, onOpen }: { vault: VaultMonth; i
   )
 }
 
-export function VaultPanel({ captureOpen, onCaptureOpenChange }: { captureOpen?: boolean; onCaptureOpenChange?: (open: boolean) => void } = {}) {
+export function VaultPanel({
+  captureOpen,
+  onCaptureOpenChange,
+  gender = "male",
+}: {
+  captureOpen?: boolean
+  onCaptureOpenChange?: (open: boolean) => void
+  gender?: "male" | "female"
+} = {}) {
   const [vaults, setVaults] = useState<VaultMonth[]>([])
   const [loading, setLoading] = useState(true)
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({})
@@ -355,7 +363,7 @@ export function VaultPanel({ captureOpen, onCaptureOpenChange }: { captureOpen?:
 
       {/* Portalled to <body>: inside the dashboard's z-0 stacking context the scanner rendered
           beneath the (portalled) Direct Capture dialog and could not be operated. */}
-      {scannerView && createPortal(<BiometricScanner view={scannerView} onCapture={handleCapture} onClose={() => setScannerView(null)} />, document.body)}
+      {scannerView && createPortal(<BiometricScanner view={scannerView} gender={gender} onCapture={handleCapture} onClose={() => setScannerView(null)} />, document.body)}
       
       <input 
         type="file" 

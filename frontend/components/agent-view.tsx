@@ -11,6 +11,8 @@ import { getAgentMessages, getDailyCount, sendAgentMessage, saveAnalysisResult }
 import { uploadProgressPhoto } from "@/app/actions/photos"
 import { analyzeVaultImage, getVaultMonths, type AnalysisResult, type VaultMonth, type VaultPhoto } from "@/app/actions/telemetry"
 import { getS3Url } from "@/lib/s3"
+import { StagingCard } from "@/components/staging-card"
+import { classifyStage, type GenderPreference } from "@/lib/staging"
 
 function AiStarIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
@@ -83,11 +85,15 @@ function ComparisonSlider({ before, after }: { before: string; after: string }) 
 export function AgentView({ 
   user, 
   tier, 
+  gender = "male",
+  onGenderChange,
   onUpgrade,
   onForwardReport
 }: { 
   user: { id: string; name: string; email: string }; 
   tier: "free" | "premium"; 
+  gender?: GenderPreference;
+  onGenderChange?: (gender: GenderPreference) => void;
   onUpgrade: () => void;
   onForwardReport?: (report: AnalysisResult) => void;
 }) {
@@ -306,6 +312,14 @@ export function AgentView({
             </div>
           </div>
 
+          {/* Clinical Staging Assessment (Norwood for Men / Ludwig for Women) */}
+          <StagingCard
+            densityPercentage={analysisResult.density_percentage}
+            miniaturizationIndex={analysisResult.miniaturization_index}
+            initialGender={gender}
+            onGenderChange={onGenderChange}
+          />
+
           <button onClick={() => setAnalysisResult(null)} className="flex items-center gap-1.5 text-[10px] text-muted-foreground/50 hover:text-muted-foreground tracking-widest uppercase transition-colors">
             <ChevronRight className="h-3 w-3 rotate-180" /> Run new analysis
           </button>
@@ -420,6 +434,24 @@ export function AgentView({
                 <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Miniaturization</p>
                 <p className="font-mono text-lg font-semibold text-chart-4">{Math.round((analysisResult?.miniaturization_index || 0) * 100)}%</p>
               </div>
+              {analysisResult && (() => {
+                const stage = classifyStage(analysisResult.density_percentage, analysisResult.miniaturization_index, gender)
+                return (
+                  <div className="border-t border-border/20 pt-2.5 flex items-center justify-between">
+                    <div>
+                      <p className="text-[9px] uppercase tracking-widest text-muted-foreground">
+                        {gender === "male" ? "Norwood Scale" : "Ludwig Scale"}
+                      </p>
+                      <p className="text-xs font-semibold text-foreground">
+                        {stage.stageLabel} · {stage.title}
+                      </p>
+                    </div>
+                    <span className="text-[9px] font-mono px-2 py-0.5 rounded-xs border border-foreground/20 bg-foreground/10 text-foreground font-semibold uppercase">
+                      {stage.severity}
+                    </span>
+                  </div>
+                )
+              })()}
             </div>
           </div>
           <DialogFooter className="sm:justify-between flex-col sm:flex-row gap-2">

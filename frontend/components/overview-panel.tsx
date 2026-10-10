@@ -16,6 +16,7 @@ import { ProgressionVaultCard } from "@/components/progression-vault"
 import { cn } from "@/lib/utils"
 import { getTelemetry, submitCheckin, getActiveMedications, type Telemetry, type MedicationRow } from "@/app/actions/telemetry"
 import { RegimenEditorDialog } from "@/components/regimen-editor-dialog"
+import { StagingCard } from "@/components/staging-card"
 
 // ── Tiny sparkline (pure SVG) ─────────────────────────────────────────────────
 function MiniSparkline({ values, color, invert }: { values: number[]; color: string; invert?: boolean }) {
@@ -55,10 +56,19 @@ const TOUR_STEPS = [
   { term: "Miniaturization", def: "The thinning of individual hair fibres over time. Lower % = healthier, thicker follicles responding to treatment." },
   { term: "Dread Shed",      def: "A temporary shedding phase (wk 3–6) where dormant follicles are replaced by stronger, anagen-phase hairs. Expected and positive." },
   { term: "Norwood Grade",   def: "A 7-level clinical scale measuring the degree of androgenic alopecia. Lower grades indicate less recession." },
+  { term: "Ludwig Grade",    def: "A 3-stage clinical scale evaluating female pattern hair loss and midline diffuse thinning. Lower stages indicate fuller density." },
   { term: "Compliance Score",def: "The percentage of days all prescribed treatments were completed as directed. 90%+ is clinical optimal." },
 ]
 
-export function OverviewPanel({ onNavigate }: { onNavigate: (v: string) => void }) {
+export function OverviewPanel({
+  onNavigate,
+  gender = "male",
+  onGenderChange,
+}: {
+  onNavigate: (v: string) => void
+  gender?: "male" | "female"
+  onGenderChange?: (g: "male" | "female") => void
+}) {
   const [telemetry, setTelemetry] = useState<Telemetry | null>(null)
   const [medications, setMedications] = useState<MedicationRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -168,6 +178,22 @@ export function OverviewPanel({ onNavigate }: { onNavigate: (v: string) => void 
           </div>
         </div>
       )}
+
+      {/* Clinical Hair Loss Staging Matrix (Norwood 1–7 / Ludwig I–III) */}
+      <StagingCard
+        densityPercentage={
+          telemetry?.progress_analytics.current_density ??
+          (matrix.length > 0 ? matrix[matrix.length - 1].density_percentage : 68.0)
+        }
+        miniaturizationIndex={
+          matrix.length > 0
+            ? matrix[matrix.length - 1].miniaturization_index
+            : 0.32
+        }
+        initialGender={gender}
+        onGenderChange={onGenderChange}
+        showScaleToggle={true}
+      />
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div data-tutorial-id="tutorial-mini-matrix" className="glass rounded-sm p-4 flex flex-col gap-3">

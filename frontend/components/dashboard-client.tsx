@@ -57,13 +57,15 @@ const VIEW_META: Record<ViewId, { title: string; subtitle: string }> = {
 interface DashboardClientProps {
   user: { id: string; name: string; email: string }
   tier: "free" | "premium"
+  gender?: "male" | "female"
   lastSeenAt?: string | null
   hasCompletedOnboarding: boolean
 }
 
-export function DashboardClient({ user, tier: initialTier, lastSeenAt, hasCompletedOnboarding }: DashboardClientProps) {
+export function DashboardClient({ user, tier: initialTier, gender: initialGender = "male", lastSeenAt, hasCompletedOnboarding }: DashboardClientProps) {
   const [view, setView] = useState<ViewId>("overview")
   const [tier, setTier] = useState(initialTier)
+  const [gender, setGender] = useState<"male" | "female">(initialGender)
   const [vaultCaptureOpen, setVaultCaptureOpen] = useState(false)
   const [forwardedReport, setForwardedReport] = useState<AnalysisResult | null>(null)
   
@@ -158,7 +160,7 @@ export function DashboardClient({ user, tier: initialTier, lastSeenAt, hasComple
 
           {/* OVERVIEW */}
           {view === "overview" && (
-            <OverviewPanel onNavigate={handleNavigate} />
+            <OverviewPanel onNavigate={handleNavigate} gender={gender} onGenderChange={setGender} />
           )}
 
           {/* CLINICAL — Protocol + Biomarkers + Correlation Engine, all gated */}
@@ -186,6 +188,7 @@ export function DashboardClient({ user, tier: initialTier, lastSeenAt, hasComple
             <VaultPanel
               captureOpen={vaultCaptureOpen}
               onCaptureOpenChange={setVaultCaptureOpen}
+              gender={gender}
             />
           )}
 
@@ -194,6 +197,8 @@ export function DashboardClient({ user, tier: initialTier, lastSeenAt, hasComple
             <AgentView 
               user={user} 
               tier={tier} 
+              gender={gender}
+              onGenderChange={setGender}
               onUpgrade={handleUpgrade} 
               onForwardReport={handleForwardReport} 
             />
@@ -201,7 +206,13 @@ export function DashboardClient({ user, tier: initialTier, lastSeenAt, hasComple
 
           {/* ACCOUNT */}
           {view === "account" && (
-            <AccountView user={user} tier={tier} onUpgrade={handleUpgrade} />
+            <AccountView 
+              user={user} 
+              tier={tier} 
+              gender={gender}
+              onGenderChange={setGender}
+              onUpgrade={handleUpgrade} 
+            />
           )}
 
           {/* UPGRADE */}
