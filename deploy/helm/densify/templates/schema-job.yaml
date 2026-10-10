@@ -1,8 +1,8 @@
-{{- if .Values.migrations.enabled }}
+{{- if .Values.schema.enabled }}
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: densify-migrate-{{ .Release.Revision }}
+  name: densify-schema-{{ .Release.Revision }}
   labels:
     {{- include "densify.labels" . | nindent 4 }}
   annotations:
@@ -20,8 +20,8 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       containers:
-        - name: migrate
-          image: {{ include "densify.image" (dict "root" . "name" "migrate") }}
+        - name: schema
+          image: {{ include "densify.image" (dict "root" . "name" "schema") }}
           env:
             - name: PGSSLROOTCERT
               value: /etc/densify/pg-ca.crt

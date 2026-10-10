@@ -20,7 +20,7 @@ TIMEOUT_SECONDS = 10
 def _sender() -> dict:
     return {
         "name": os.getenv("EMAIL_SENDER_NAME", "Densify Clinical"),
-        "email": os.getenv("EMAIL_SENDER_ADDRESS", "densly.official@gmail.com"),
+        "email": os.getenv("EMAIL_SENDER_ADDRESS", "densifyai@gmail.com"),
     }
 
 

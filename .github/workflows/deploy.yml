@@ -47,12 +47,12 @@ jobs:
           context: backend
           push: true
           tags: ${{ env.REGISTRY }}/densify-api:${{ github.sha }}
-      - name: migrate image
+      - name: schema image
         uses: docker/build-push-action@v6
         with:
           context: db
           push: true
-          tags: ${{ env.REGISTRY }}/densify-migrate:${{ github.sha }}
+          tags: ${{ env.REGISTRY }}/densify-schema:${{ github.sha }}
       # NEXT_PUBLIC_* are inlined at build time → one web image per environment.
       - name: web image
         uses: docker/build-push-action@v6
@@ -111,7 +111,7 @@ jobs:
           mkdir -p ~/.kube
           echo "${{ secrets.KUBECONFIG_B64 }}" | base64 -d > ~/.kube/config
           chmod 600 ~/.kube/config
-      # Migrations run as a pre-upgrade hook Job (densify-migrate image).
+      # Schema is applied by a pre-upgrade hook Job (densify-schema image).
       - name: helm upgrade
         run: |
           helm upgrade --install densify deploy/helm/densify \

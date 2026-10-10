@@ -1,6 +1,7 @@
 env                 = "staging"
 region              = "us-ord"
-obj_region          = "us-ord-1"
+obj_region          = "us-ord"
+obj_endpoint        = "us-ord-10.linodeobjects.com"
 node_count          = 3
 node_autoscaler_min = 3
 node_autoscaler_max = 4

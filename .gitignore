@@ -1,27 +1,72 @@
+# ===== Secrets & local env (never commit) =====
 .env
-.env*.local
+.env.*
 !.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.auto.tfvars
+secrets/
+secrets.*
+*.zip
+*.7z
+*.rar
+deploy/vm/.env
+
+# ===== Node / Next.js =====
 node_modules/
 .next/
+out/
 *.tsbuildinfo
 next-env.d.ts
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.vercel/
+
+# ===== Python =====
 __pycache__/
-*.pyc
+*.py[cod]
 venv/
 .venv/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.egg-info/
+
+# ===== Terraform / Helm =====
 .terraform/
 *.tfstate
 *.tfstate.*
 tfplan
+*.tfplan
+crash.log
+crash.*.log
+deploy/helm/**/charts/*.tgz
+
+# ===== E2E (Playwright) =====
 e2e/playwright-report/
 e2e/test-results/
+e2e/blob-report/
+e2e/playwright/.cache/
+e2e/.auth/
+
+# ===== Logs & coverage =====
+*.log
+coverage/
+
+# ===== Editors & OS =====
+.vscode/
+.idea/
+*.swp
+*.swo
 .DS_Store
-
-# Local credentials (never commit)
-*.auto.tfvars
-secrets/
-
-# Vercel CLI link + rendered deploy env
-.vercel/
-deploy/vm/.env
+Thumbs.db
+desktop.ini
+.claude/settings.local.json

@@ -20,11 +20,18 @@ variable "region" {
   default     = "us-ord"
 }
 
-# TODO(🔎 VERIFY): Object Storage region id for Chicago (expected us-ord-1 → endpoint us-ord-1.linodeobjects.com).
+# Object Storage: region id (for buckets/keys) and S3 endpoint host are different — Chicago is
+# region "us-ord" served from the E3 endpoint us-ord-10.linodeobjects.com (GET /v4/object-storage/endpoints).
 variable "obj_region" {
   description = "Object Storage region id."
   type        = string
-  default     = "us-ord-1"
+  default     = "us-ord"
+}
+
+variable "obj_endpoint" {
+  description = "Object Storage S3 endpoint host for obj_region."
+  type        = string
+  default     = "us-ord-10.linodeobjects.com"
 }
 
 variable "obj_admin_access_key" {

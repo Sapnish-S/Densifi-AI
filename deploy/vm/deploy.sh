@@ -2,7 +2,7 @@
 # Deploy the FastAPI backend to the Akamai Linode VM created by Terraform (vm mode).
 #   deploy/vm/deploy.sh
 # Steps: read Terraform outputs → render .env + DB CA into a staging dir → copy to the
-# VM over SSH → wait for cloud-init → run migrations → (re)build + start api and Caddy
+# VM over SSH → wait for cloud-init → apply schema → (re)build + start api and Caddy
 # → smoke test https://<api hostname>/health.
 # Optional env: VERCEL_ORIGINS="https://densify-ai.vercel.app,https://app.densify.tech"
 . "$(dirname "$0")/../lib.sh"
@@ -16,7 +16,7 @@ SSH=(ssh -i "$KEY" -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$S
 STAGE="$(mktemp -d)"; trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$STAGE/backend" "$STAGE/db"
 cp "$ROOT"/backend/{main,database,analyzer,email_service,llm_provider}.py "$ROOT"/backend/{requirements.txt,Dockerfile,.dockerignore} "$STAGE/backend/"
-cp -r "$ROOT/db/migrations" "$ROOT/db/migrate.sh" "$STAGE/db/"
+cp -r "$ROOT/db/schema" "$ROOT/db/apply-schema.sh" "$STAGE/db/"
 cp "$ROOT/deploy/vm/docker-compose.yml" "$ROOT/deploy/vm/Caddyfile" "$STAGE/"
 
 # Managed PostgreSQL CA (the provider returns it base64-encoded; accept raw PEM too).
@@ -34,7 +34,7 @@ cat > "$STAGE/.env" <<ENV
 API_HOSTNAME=$API_HOSTNAME
 DATABASE_URL=postgresql://$DB_USER:$ENC_PASS@$DB_HOST:$DB_PORT/$DB_NAME?sslmode=verify-full
 S3_ENDPOINT=$(tf_out s3_endpoint)
-S3_REGION=us-ord-1
+S3_REGION=us-ord
 S3_BUCKET=$(tf_out vault_bucket)
 S3_ACCESS_KEY_ID=$(tf_out s3_app_access_key)
 S3_SECRET_ACCESS_KEY=$(tf_out s3_app_secret_key)
@@ -48,7 +48,7 @@ LLM_FAST_MODEL=us.amazon.nova-lite-v1:0
 CORS_ALLOW_ORIGINS=${VERCEL_ORIGINS:-https://densify-ai.vercel.app}
 INTERNAL_API_SECRET=$(secret internal_api_secret optional)
 BREVO_API_KEY=$(secret brevo_api_key optional)
-EMAIL_SENDER_ADDRESS=densly.official@gmail.com
+EMAIL_SENDER_ADDRESS=densifyai@gmail.com
 EMAIL_SENDER_NAME=Densify Clinical
 ENV
 
@@ -58,8 +58,8 @@ echo "== waiting for cloud-init on $HOST_IP"
 echo "== uploading release"
 tar -C "$STAGE" -czf - . | "${SSH[@]}" "mkdir -p /opt/densify && tar -xzf - -C /opt/densify && chmod 600 /opt/densify/.env"
 
-echo "== migrations + start"
-"${SSH[@]}" "cd /opt/densify && docker compose --profile migrate run --rm migrate && docker compose up -d --build --remove-orphans && docker image prune -f >/dev/null"
+echo "== schema + start"
+"${SSH[@]}" "cd /opt/densify && docker compose --profile schema run --rm schema && docker compose up -d --build --remove-orphans && docker image prune -f >/dev/null"
 
 echo "== smoke test https://$API_HOSTNAME/health"
 for i in $(seq 1 30); do

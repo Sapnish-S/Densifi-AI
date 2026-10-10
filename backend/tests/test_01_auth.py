@@ -220,7 +220,7 @@ def test_brevo_request_shape(monkeypatch):
     assert captured["url"] == "https://api.brevo.com/v3/smtp/email"
     assert captured["headers"] == {"accept": "application/json", "api-key": "xkeysib-test", "content-type": "application/json"}
     assert captured["json"] == {
-        "sender": {"name": "Densify Clinical", "email": "densly.official@gmail.com"},
+        "sender": {"name": "Densify Clinical", "email": "densifyai@gmail.com"},
         "to": [{"email": "to@example.com"}], "subject": "Subj", "htmlContent": "<p>x</p>",
     }
     assert captured["timeout"] == 10

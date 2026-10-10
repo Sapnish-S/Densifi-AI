@@ -45,6 +45,6 @@ provider "aws" {
   s3_use_path_style           = true
 
   endpoints {
-    s3 = "https://${var.obj_region}.linodeobjects.com"
+    s3 = "https://${var.obj_endpoint}"
   }
 }
