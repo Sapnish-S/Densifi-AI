@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState, useTransition } from "react"
+import { SITE_ASSETS_BASE } from "@/lib/site-assets"
 import {
   Bell,
   BellOff,
@@ -114,7 +115,7 @@ export function NotificationEngine({ tier }: NotificationEngineProps) {
       setPushStatus(permission as "granted" | "denied")
       if (permission !== "granted") return
 
-      const reg = await navigator.serviceWorker.register("/sw.js")
+      const reg = await navigator.serviceWorker.register(`/sw.js?assets=${encodeURIComponent(SITE_ASSETS_BASE)}`)
       await navigator.serviceWorker.ready
 
       // Subscribe — VAPID public key would come from env in production.

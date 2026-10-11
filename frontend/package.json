@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "assets:upload": "node --env-file-if-exists=../.env scripts/site-assets/sync.mjs upload",
+    "assets:download": "node --env-file-if-exists=../.env scripts/site-assets/sync.mjs download"
   },
   "engines": {
     "node": ">=20.9.0"

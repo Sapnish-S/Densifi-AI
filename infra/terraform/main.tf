@@ -227,7 +227,8 @@ resource "aws_s3_bucket_cors_configuration" "vault" {
   }
 }
 
-# Vault objects are publicly readable so <img src> works directly.
+# Vault objects and site imagery (site/*, uploaded with `npm run assets:upload`)
+# are publicly readable so <img src> works directly.
 resource "aws_s3_bucket_policy" "vault_public_read" {
   count    = var.vault_public_read ? 1 : 0
   provider = aws.obj
@@ -240,7 +241,10 @@ resource "aws_s3_bucket_policy" "vault_public_read" {
       Effect    = "Allow"
       Principal = { AWS = ["*"] }
       Action    = ["s3:GetObject"]
-      Resource  = ["arn:aws:s3:::${linode_object_storage_bucket.vault.label}/vault/*"]
+      Resource = [
+        "arn:aws:s3:::${linode_object_storage_bucket.vault.label}/vault/*",
+        "arn:aws:s3:::${linode_object_storage_bucket.vault.label}/site/*",
+      ]
     }]
   })
 }

@@ -70,3 +70,6 @@ coverage/
 Thumbs.db
 desktop.ini
 .claude/settings.local.json
+
+# ===== Site imagery (lives in Object Storage — see README "Site assets") =====
+frontend/site-assets/

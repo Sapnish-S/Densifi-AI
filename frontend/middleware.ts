@@ -40,8 +40,9 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   // Apply this middleware to the root ("/") and any other protected routes.
-  // We strictly EXCLUDE public routes like auth pages, APIs, and static files.
+  // We strictly EXCLUDE public routes like auth pages, APIs, and static files
+  // (including /public images, which the logged-out landing page needs).
   matcher: [
-    "/((?!api|_next/static|_next/image|favicon.ico|landing|sign-in|sign-up|forgot-password|reset-password|verify).*)"
+    "/((?!api|_next/static|_next/image|favicon.ico|landing|sign-in|sign-up|forgot-password|reset-password|verify|.*\\.(?:png|jpg|jpeg|gif|svg|webp|avif|ico)$).*)"
   ],
 };

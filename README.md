@@ -80,9 +80,75 @@ Tear down: `deploy/provision.sh destroy --yes`.
 Alternative without Git import: `deploy/vercel/deploy.sh` deploys with the Vercel CLI (needs
 `secrets/vercel_token.txt`).
 
+## Site assets (images live in Object Storage, not in git)
+
+Logos, icons, hero photos, mascots and other site imagery are **not committed**. They are
+stored in the vault bucket under the public `site/` prefix — Akamai Object Storage in
+staging/prod, SeaweedFS locally — and the app links to them with `siteAsset("brand/logo-white.png")`
+(`frontend/lib/site-assets.ts`). The base URL is `${NEXT_PUBLIC_S3_PUBLIC_BASE_URL}/site`
+(override with `NEXT_PUBLIC_SITE_ASSETS_URL`), so no extra configuration is needed per environment.
+`frontend/public/` only keeps `sw.js`.
+
+Working copy: `frontend/site-assets/` (gitignored), mirroring the bucket layout:
+
+```
+site-assets/
+  brand/    logo-black.png, logo-white.png, mark-black.png, mark-white.png
+  icons/    favicons (icon-light/dark-32x32), icon-192/512, apple-icon
+  hero/     hero-man.jpg, hero-man-bald.jpg, hero-growmap.png   (landing regrowth effect)
+  mascots/  dr-claude.png, dr-nova.png
+  avatars/  avatar-1..3.png                                    (testimonial photos, optional)
+  app/      hero-model.png                                      (optional)
+  source/   original logo renders the brand assets are generated from
+```
+
+Sync with `npm run assets:upload` / `npm run assets:download` (from `frontend/`). They use the
+same `S3_*` variables as the app (or `S3_AKAMAI_*` with `--target akamai`; the npm scripts load
+the repo-root `.env`), upload only changed files (MD5 vs ETag) and set `Content-Type` and
+`Cache-Control`.
+
+```sh
+cd frontend
+# Akamai — S3_AKAMAI_* from the repo-root .env
+npm run assets:download -- --target akamai          # get the current set
+npm run assets:upload   -- --target akamai --dry-run
+npm run assets:upload   -- --target akamai
+
+# Local stack (SeaweedFS from docker compose)
+S3_ENDPOINT=http://127.0.0.1:9000 S3_BUCKET=densify-vault-storage \
+S3_ACCESS_KEY_ID=densify-local S3_SECRET_ACCESS_KEY=densify-local-secret \
+npm run assets:upload
+```
+
+Public read on Akamai comes from the bucket policy (`site/*` next to `vault/*`, see Terraform);
+the bucket rejects per-object ACLs. Akamai's `us-ord-10` endpoint also doesn't support bucket CORS
+configuration, so images WebGL must read (the hero regrowth plates) fall back to the same-origin
+`/site-proxy/*` rewrite in `frontend/next.config.mjs`; everything else loads straight from the
+bucket. Generators for derived assets: `frontend/scripts/brand/` (logos/icons from
+`source/1.png`) and `frontend/scripts/hero-regrowth/` (bald plate + growth map).
+
 ## Known gaps
 
-- Logo artwork: `frontend/public/densify-logo-{dark,light,login}.svg` and other binary assets (hero,
-  mascots, avatars, favicons) still need to be added to `frontend/public/`.
+- Testimonial avatars (`site/avatars/avatar-1..3.png`) are not uploaded yet; cards fall back to initials.
+- **Fresh local stacks and CI start with an empty SeaweedFS**, so site images 404 until someone runs
+  `npm run assets:download -- --target akamai` + the local `assets:upload` above. Tests don't assert on
+  images and the hero falls back to the static photo, so CI still passes.
+- **Akamai bucket state (prod, `densify-vault-storage`)** — set up by hand on 2026-10-10, ahead of
+  `terraform apply`: all `site/*` assets uploaded, and `site/*` added to the `PublicReadVaultObjects`
+  policy statement (the per-key `auto-*` statement was kept). `infra/terraform/main.tf` already
+  declares the same policy, so the next apply is a no-op for it. The staging bucket has no site assets yet.
+- **No bucket CORS on Akamai `us-ord-10`** — `PutBucketCors`/`GetBucketCors` return `501 NotImplemented`
+  and objects come back without `Access-Control-Allow-Origin`, so `aws_s3_bucket_cors_configuration.vault`
+  will fail on apply. Site images are unaffected (plain `<img>`; the WebGL hero uses `/site-proxy`),
+  but **vault uploads are at risk in prod**: the browser PUTs to a presigned URL
+  (`components/vault-panel.tsx`), which needs CORS. Options: an upload proxy route in the app, or a
+  bucket on an endpoint that supports CORS. Verify with a real upload before launch.
+- **Admin Object Storage keys** live in `secrets/obj_access_key.txt` (20-char key id) and
+  `secrets/obj_secret_key.txt` (secret); Terraform uses them for the bucket policy/CORS. They were
+  stored swapped/invalid before 2026-10-10 and have been replaced.
+- **E2E flake under `next dev`** — `02-landing › engine room … terminal typewriter` can time out when the
+  suite runs against a dev server (slow dev bundles + software-rendered WebGL hero starve the
+  typewriter interval). It passes against the production build (`docker compose up web`), which is
+  what CI uses.
 - Items marked `🔎 VERIFY` in Terraform (plan ids, region availability, DB defaults) are confirmed at the
   first `terraform plan`.

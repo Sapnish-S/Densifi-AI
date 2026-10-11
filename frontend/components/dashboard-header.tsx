@@ -52,7 +52,7 @@ export function DashboardHeader({ user, tier, onNavigate, onCamera, lastSeenAt }
               className="flex items-center focus-visible:outline-none"
               aria-label="Go to overview"
             >
-              <DensifyLogomark variant="navbar" height={60} />
+              <DensifyLogomark variant="navbar" height={52} />
             </button>
             {tier === "premium" && (
               <>
