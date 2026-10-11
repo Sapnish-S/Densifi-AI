@@ -47,9 +47,10 @@ test.describe("Landing", () => {
     await page.goto("/landing")
     await expect(page.getByText("Now in Open Beta")).toBeVisible()
     const h1 = page.getByRole("heading", { level: 1 })
-    await expect(h1).toContainText("Clinical Precision.")
-    await expect(h1).toContainText("Radical Clarity.")
-    await expect(h1.locator("span.text-zinc-300")).toHaveText("Radical Clarity.")
+    await expect(h1).toContainText("Your fears")
+    await expect(h1).toContainText("are now ours.")
+    const card = page.getByRole("heading", { level: 2, name: /Clinical Precision\./ })
+    await expect(card).toContainText("Radical Clarity.")
     await expect(
       page.getByText("Replace subjective guesswork with AI-powered biometric tracking. The ultimate vault for your hair progression."),
     ).toBeVisible()
@@ -66,9 +67,9 @@ test.describe("Landing", () => {
   test("stats counters animate to final values when scrolled into view", async ({ page }) => {
     await page.goto("/landing")
     await page.getByText("Active Vaults").scrollIntoViewIfNeeded()
-    await expect(page.getByText("12,400+")).toBeVisible({ timeout: 5_000 })
-    await expect(page.getByText("847,000+")).toBeVisible({ timeout: 5_000 })
-    await expect(page.getByText("320+", { exact: true })).toBeVisible({ timeout: 5_000 })
+    await expect(page.getByText("48+", { exact: true })).toBeVisible({ timeout: 5_000 })
+    await expect(page.getByText("1,260+", { exact: true })).toBeVisible({ timeout: 5_000 })
+    await expect(page.getByText("6+", { exact: true })).toBeVisible({ timeout: 5_000 })
     await expect(page.getByText("Scans Analyzed")).toBeVisible()
     await expect(page.getByText("Partner Clinicians")).toBeVisible()
   })

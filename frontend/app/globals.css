@@ -203,6 +203,39 @@ html.light {
   }
 }
 
+/* ── Landing palette (warm editorial: ink, cream, copper) ── */
+:root {
+  --landing-ink: #0c0a09;
+  --landing-cream: #f6f2ec;
+  --landing-accent: oklch(0.78 0.12 65);       /* amber — on dark surfaces */
+  --landing-accent-deep: oklch(0.56 0.13 48);  /* copper — text/fills on light surfaces */
+}
+
+/* ── Landing motion ── */
+@keyframes landingMarquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+@keyframes landingShimmer {
+  0%, 60% { transform: translateX(-120%) skewX(-20deg); }
+  100%    { transform: translateX(220%) skewX(-20deg); }
+}
+@keyframes landingScan {
+  0%   { top: 0%; opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+@layer utilities {
+  .landing-marquee { animation: landingMarquee 40s linear infinite; }
+  .landing-marquee-wrap:hover .landing-marquee { animation-play-state: paused; }
+  .landing-shimmer { animation: landingShimmer 3.2s ease-in-out infinite; }
+  .landing-scan { animation: landingScan 3.5s ease-in-out infinite; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .landing-marquee, .landing-shimmer, .landing-scan { animation: none; }
+}
+
 @keyframes radialPulse {
   0%, 100% { opacity: 0; transform: translate(-50%, -50%) scale(0.85); }
   50%       { opacity: 1; transform: translate(-50%, -50%) scale(1.05); }
