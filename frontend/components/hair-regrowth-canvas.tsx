@@ -130,9 +130,9 @@ export function HairRegrowthCanvas({
       return
     }
 
-    // Direct from Object Storage when it sends CORS headers (SeaweedFS locally); otherwise
-    // fall back to the same-origin /site-proxy rewrite (Akamai can't be configured for CORS).
-    const load = (src: string) => loadImage(src).catch(() => loadImage(siteAssetProxied(src)))
+    // Same-origin /site-proxy rewrite first (Akamai can't be configured for CORS, so a direct
+    // crossOrigin load fails noisily in the console); direct load is the fallback.
+    const load = (src: string) => loadImage(siteAssetProxied(src)).catch(() => loadImage(src))
     Promise.all([load(hairSrc), load(baldSrc), load(mapSrc)])
       .then(([hairImg, baldImg, mapImg]) => {
         if (disposed) return

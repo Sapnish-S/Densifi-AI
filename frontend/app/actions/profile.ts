@@ -17,14 +17,14 @@ async function getUserId(): Promise<string> {
 export async function getProfile() {
   const userId = await getUserId()
   const res = await query(
-    `SELECT id, "userId", tier, "displayName", gender, "createdAt" FROM profile WHERE "userId" = $1 LIMIT 1`,
+    `SELECT * FROM profile WHERE "userId" = $1 LIMIT 1`, // * so a missing gender column (0002 not applied) still works
     [userId],
   )
   if (res.rows.length === 0) {
     // Auto-create profile on first access
     const id = randomUUID()
     await query(
-      `INSERT INTO profile (id, "userId", tier, "displayName", gender, "createdAt", "updatedAt") VALUES ($1, $2, $3, $4, 'male', now(), now())`,
+      `INSERT INTO profile (id, "userId", tier, "displayName", "createdAt", "updatedAt") VALUES ($1, $2, $3, $4, now(), now())`,
       [id, userId, "free", null],
     )
     return { id, userId, tier: "free" as const, displayName: null, gender: "male" as const }
