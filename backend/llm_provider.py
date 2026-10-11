@@ -132,7 +132,7 @@ class AnthropicProvider(LLMProvider):
                 "type": "image",
                 "source": {
                     "type": "base64",
-                    "media_type": "image/png" if fmt == "png" else "image/jpeg",
+                    "media_type": f"image/{fmt}",
                     "data": base64.b64encode(data).decode("ascii"),
                 },
             }

@@ -1,6 +1,5 @@
 "use client"
 
-import { getPublicApiUrl } from "@/lib/api-url"
 import { useEffect, useRef, useState, useCallback } from "react"
 import Image from "next/image"
 import { ImagePlus, Send, Loader2, AlertCircle, Crown, ScanLine, ChevronRight, Lock, Stethoscope } from "lucide-react"
@@ -8,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 import { getAgentMessages, getDailyCount, sendAgentMessage, saveAnalysisResult } from "@/app/actions/agent"
-import { uploadProgressPhoto } from "@/app/actions/photos"
+import { uploadToVault } from "@/lib/vault-upload"
 import { analyzeVaultImage, getVaultMonths, type AnalysisResult, type VaultMonth, type VaultPhoto } from "@/app/actions/telemetry"
 import { getS3Url } from "@/lib/s3"
 import { StagingCard } from "@/components/staging-card"
@@ -101,7 +100,7 @@ export function AgentView({
   const [dailyCount, setDailyCount] = useState(0)
   const [input, setInput] = useState("")
   const [photoPreview, setPhotoPreview] = useState<string | null>(null)
-  const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null)
+  const [photoFile, setPhotoFile] = useState<File | null>(null)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -124,8 +123,7 @@ export function AgentView({
         const [msgs, count, v] = await Promise.all([getAgentMessages(), getDailyCount(), getVaultMonths()])
         setMessages(msgs)
         setDailyCount(count)
-        // Sort vaults newest first
-        setVaults([...v].sort((a, b) => b.id.localeCompare(a.id)))
+        setVaults(v)
       } finally {
         setLoading(false)
       }
@@ -139,26 +137,33 @@ export function AgentView({
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
+    if (fileRef.current) fileRef.current.value = ""
     if (!file) return
-    const reader = new FileReader()
-    reader.onload = (ev) => {
-      const url = ev.target?.result as string
-      setPhotoPreview(url)
-      setPhotoDataUrl(url)
-    }
-    reader.readAsDataURL(file)
+    setPhotoFile(file)
+    setPhotoPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return URL.createObjectURL(file)
+    })
   }
 
-  // 1. Find the absolutely most recent photo across ALL views
-  const allPhotos = vaults.flatMap((v) => v.photos)
-  allPhotos.sort((a, b) => new Date(a.taken_at || 0).getTime() - new Date(b.taken_at || 0).getTime())
-  
-  const currentPhoto = allPhotos.length > 0 ? allPhotos[allPhotos.length - 1] : null
-  
-  // 2. Find the baseline (oldest) photo that matches the exact same view (e.g. Crown) as the latest photo
-  const baselinePhoto = currentPhoto 
-    ? allPhotos.find(p => p.label === currentPhoto.label) 
-    : null
+  function clearPhoto() {
+    setPhotoPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return null
+    })
+    setPhotoFile(null)
+  }
+
+  // Comparison pair: the latest vault photo, and the FIRST photo ever taken of that same
+  // view (Front/Crown/Side). Only photos stored in object storage (with an S3 key) qualify;
+  // legacy rows holding inline data URLs can't be read by the analysis service.
+  const vaultPhotos = vaults
+    .flatMap((v) => v.photos)
+    .filter((p) => p.s3_key && ["Front", "Crown", "Side"].includes(p.label))
+    .sort((a, b) => new Date(a.taken_at || 0).getTime() - new Date(b.taken_at || 0).getTime())
+
+  const currentPhoto = vaultPhotos.length > 0 ? vaultPhotos[vaultPhotos.length - 1] : null
+  const baselinePhoto = currentPhoto ? vaultPhotos.find((p) => p.label === currentPhoto.label) ?? null : null
 
   async function handleAnalyze() {
     setAnalysisError(null)
@@ -170,31 +175,8 @@ export function AgentView({
       if (baselinePhoto.id === currentPhoto.id) {
         throw new Error(`We found your latest ${currentPhoto.label} photo, but you need at least two ${currentPhoto.label} photos to compare progress.`)
       }
-      if (!baselinePhoto.s3_key || !currentPhoto.s3_key) {
-        throw new Error("Both Baseline and Latest photos must be uploaded to S3 to be analysed.")
-      }
-
-      const isLocal = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-      const rawApiUrl = getPublicApiUrl();
-      const apiUrl = rawApiUrl.replace(/\/+$/, "")
-      const res = await fetch(`${apiUrl}/analyze`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_id: user.id,
-          baseline_s3_key: baselinePhoto.s3_key,
-          current_s3_key: currentPhoto.s3_key
-        })
-      })
-
-      if (!res.ok) {
-        const text = await res.text().catch(() => "no body")
-        console.error(`[analyze] API returned ${res.status}:`, text)
-        throw new Error(`Analysis service returned ${res.status}`)
-      }
-
-      const data = await res.json()
-      if (data.error) {
+      const data = await analyzeVaultImage(baselinePhoto.s3_key!, currentPhoto.s3_key!)
+      if ("error" in data) {
         throw new Error(data.error_message || "Analysis failed.")
       }
       setAnalysisResult(data as AnalysisResult)
@@ -208,20 +190,21 @@ export function AgentView({
   }
 
   async function handleSend() {
-    if (!input.trim() && !photoDataUrl) return
+    if (!input.trim() && !photoFile) return
     if (limitReached) return
     setSending(true)
     setError(null)
     try {
       let photoId: string | undefined
-      if (photoDataUrl) {
-        photoId = await uploadProgressPhoto(photoDataUrl, "crown")
+      if (photoFile) {
+        // Stored in the vault as a Crown capture so it joins the comparison timeline.
+        photoId = (await uploadToVault(photoFile, "Crown")).id
+        getVaultMonths().then(setVaults).catch(() => {})
       }
       const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: input || "Please analyze my progress photo.", photoId: photoId ?? null, createdAt: new Date().toISOString() }
       setMessages((prev) => [...prev, userMsg])
       setInput("")
-      setPhotoPreview(null)
-      setPhotoDataUrl(null)
+      clearPhoto()
       const reply = await sendAgentMessage(userMsg.content, photoId)
       const botMsg: Message = { id: crypto.randomUUID(), role: "assistant", content: reply, createdAt: new Date().toISOString() }
       setMessages((prev) => [...prev, botMsg])
@@ -398,14 +381,14 @@ export function AgentView({
             {photoPreview && (
               <div className="relative w-14 h-14 rounded-sm overflow-hidden border border-border/40">
                 <img src={photoPreview} alt="Selected photo" className="w-full h-full object-cover" />
-                <button onClick={() => { setPhotoPreview(null); setPhotoDataUrl(null) }} className="absolute top-0.5 right-0.5 flex h-4 w-4 items-center justify-center rounded-sm bg-background/90 text-foreground text-[10px] hover:bg-background border border-border/40">×</button>
+                <button onClick={clearPhoto} className="absolute top-0.5 right-0.5 flex h-4 w-4 items-center justify-center rounded-sm bg-background/90 text-foreground text-[10px] hover:bg-background border border-border/40">×</button>
               </div>
             )}
             <div className="flex gap-2">
               <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
               <Button variant="outline" size="icon" className="h-9 w-9 shrink-0 border-border/50 rounded-sm hover:border-foreground/30 transition-all" onClick={() => fileRef.current?.click()} disabled={sending}><ImagePlus className="h-3.5 w-3.5" /></Button>
               <input type="text" value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend() } }} placeholder="Ask about your progress, diet, protocol…" disabled={sending} className="flex-1 h-9 rounded-sm border border-border/50 bg-card/60 px-3 text-sm placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-ring backdrop-blur-sm" />
-              <Button size="icon" className="h-9 w-9 shrink-0 rounded-sm bg-foreground text-background hover:bg-foreground/90 transition-all" onClick={handleSend} disabled={sending || (!input.trim() && !photoDataUrl)}>{sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}</Button>
+              <Button size="icon" className="h-9 w-9 shrink-0 rounded-sm bg-foreground text-background hover:bg-foreground/90 transition-all" onClick={handleSend} disabled={sending || (!input.trim() && !photoFile)}>{sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}</Button>
             </div>
           </>
         )}

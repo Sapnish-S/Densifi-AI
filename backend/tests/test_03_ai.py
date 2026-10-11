@@ -162,6 +162,14 @@ def test_analyze_unexpected_error(client, fake_s3):
         llm_provider.set_provider(None)
 
 
+def test_image_format_sniffs_bytes_before_extension():
+    assert analyzer.image_format("a.png", b"\xff\xd8\xff\xe0rest") == "jpeg"  # re-encoded JPEG under a .png key
+    assert analyzer.image_format("a.jpg", b"RIFF\x00\x00\x00\x00WEBPVP8 ") == "webp"
+    assert analyzer.image_format("a.jpg", b"\x89PNG\r\n\x1a\n") == "png"
+    assert analyzer.image_format("a.webp", b"??") == "webp"
+    assert analyzer.image_format("a.bin") == "jpeg"
+
+
 def test_analyze_obsolete_s3_key_body_422(client):
     """The unused server-action proxy sends {user_id, s3_key} → Pydantic 422 (U27)."""
     assert client.post("/analyze", json={"user_id": "u", "s3_key": "x"}).status_code == 422

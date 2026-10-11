@@ -140,8 +140,18 @@ def _s3_client():
     )
 
 
-def image_format(key: str) -> str:
-    return "png" if key.lower().split(".")[-1] == "png" else "jpeg"
+def image_format(key: str, data: bytes = b"") -> str:
+    """png | jpeg | webp | gif — sniffed from the bytes, falling back to the key's extension."""
+    if data.startswith(b"\x89PNG"):
+        return "png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "jpeg"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    if data.startswith(b"GIF8"):
+        return "gif"
+    ext = key.lower().rsplit(".", 1)[-1]
+    return {"png": "png", "webp": "webp", "gif": "gif"}.get(ext, "jpeg")
 
 
 def extract_json_object(text: str) -> dict:
@@ -178,8 +188,8 @@ def analyze_vault_image(baseline_s3_key: str, current_s3_key: str) -> dict:
         provider = get_provider()
         raw = provider.vision_compare(
             CLAUDE_SYSTEM_PROMPT,
-            baseline, image_format(baseline_s3_key),
-            current, image_format(current_s3_key),
+            baseline, image_format(baseline_s3_key, baseline),
+            current, image_format(current_s3_key, current),
             VISION_INSTRUCTION,
             max_tokens=1024,
             temperature=0.1,

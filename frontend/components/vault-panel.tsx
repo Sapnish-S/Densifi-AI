@@ -9,30 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { cn } from "@/lib/utils"
 import { BiometricScanner, type CaptureView } from "@/components/biometric-scanner"
 import { getVaultMonths, type VaultMonth, type VaultPhoto } from "@/app/actions/telemetry"
-import { getS3Url } from "@/lib/s3"
-
-// Uploads go through /api/vault-put, and Vercel caps request bodies at 4.5 MB.
-// Larger images are scaled down and re-encoded as JPEG to fit under the cap.
-const MAX_UPLOAD_BYTES = 4_000_000
-
-async function fitForUpload(blob: Blob, contentType: string): Promise<{ blob: Blob; contentType: string }> {
-  if (blob.size <= MAX_UPLOAD_BYTES) return { blob, contentType }
-  const bitmap = await createImageBitmap(blob)
-  for (const maxSide of [3072, 2048, 1600]) {
-    const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height))
-    const canvas = document.createElement("canvas")
-    canvas.width = Math.round(bitmap.width * scale)
-    canvas.height = Math.round(bitmap.height * scale)
-    canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
-    const jpeg = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9))
-    if (jpeg && jpeg.size <= MAX_UPLOAD_BYTES) {
-      bitmap.close()
-      return { blob: jpeg, contentType: "image/jpeg" }
-    }
-  }
-  bitmap.close()
-  throw new Error("Image too large to upload")
-}
+import { uploadToVault } from "@/lib/vault-upload"
 
 function AlignmentOverlay() {
   return (
@@ -127,6 +104,7 @@ export function VaultPanel({
 
   const [scannerView, setScannerView] = useState<CaptureView | null>(null)
   const [uploading, setUploading] = useState<Partial<Record<CaptureView, "uploading" | "done" | "error">>>({})
+  const [uploadErrors, setUploadErrors] = useState<Partial<Record<CaptureView, string>>>({})
   
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [uploadView, setUploadView] = useState<CaptureView | null>(null)
@@ -135,7 +113,7 @@ export function VaultPanel({
   useEffect(() => {
     if (validatingUpload) {
       const timer = setTimeout(() => {
-        handleCapture(validatingUpload.file, validatingUpload.view, validatingUpload.file.type)
+        handleCapture(validatingUpload.file, validatingUpload.view)
         URL.revokeObjectURL(validatingUpload.previewUrl)
         setValidatingUpload(null)
       }, 2500)
@@ -188,32 +166,18 @@ export function VaultPanel({
     setUploadView(null)
   }
 
-  async function handleCapture(blob: Blob, view: CaptureView, contentType: string = "image/png") {
+  async function handleCapture(blob: Blob, view: CaptureView) {
     setScannerView(null)
     setUploading((prev) => ({ ...prev, [view]: "uploading" }))
+    setUploadErrors((prev) => ({ ...prev, [view]: undefined }))
     try {
-      // Server-side upload: Akamai's E3 Object Storage endpoint has no CORS support,
-      // so the browser can't PUT to a presigned URL directly.
-      const upload = await fitForUpload(blob, contentType)
-      const put = await fetch(`/api/vault-put?view=${encodeURIComponent(view)}`, {
-        method: "POST",
-        headers: { "Content-Type": upload.contentType },
-        body: upload.blob,
-      })
-      if (!put.ok) throw new Error("Vault upload failed")
-      const { key } = await put.json()
-
-      const save = await fetch("/api/vault-save", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key, view, takenAt: new Date().toISOString() }),
-      })
-      if (!save.ok) throw new Error("Failed to save photo record")
-
+      await uploadToVault(blob, view)
       setUploading((prev) => ({ ...prev, [view]: "done" }))
       load() // refresh vault list
-    } catch {
+    } catch (e) {
+      console.error(`[vault] ${view} upload failed`, e)
       setUploading((prev) => ({ ...prev, [view]: "error" }))
+      setUploadErrors((prev) => ({ ...prev, [view]: e instanceof Error ? e.message : "Upload failed" }))
     }
   }
 
@@ -283,7 +247,7 @@ export function VaultPanel({
                     </div>
                     <div className="flex-1">
                       <p className={cn("text-xs font-semibold", done ? "text-foreground" : "text-foreground")}>{view} View</p>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">{busy ? "Uploading to vault..." : done ? "Captured & uploaded" : err ? "Upload failed — tap to retry" : "Tap to open scanner"}</p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">{busy ? "Uploading to vault..." : done ? "Captured & uploaded" : err ? `${uploadErrors[view] ?? "Upload failed"} — tap to retry` : "Tap to open scanner"}</p>
                     </div>
                   </button>
                   {!done && !busy && (
@@ -307,7 +271,7 @@ export function VaultPanel({
               )
             })}
             <Button className="w-full h-9 gap-2 text-[11px] font-semibold tracking-widest uppercase rounded-sm bg-foreground text-background hover:bg-foreground/90 transition-all"
-              onClick={() => { setUploadOpen(false); setUploading({}) }}>
+              onClick={() => { setUploadOpen(false); setUploading({}); setUploadErrors({}) }}>
               <Check className="h-3.5 w-3.5" /> Done
             </Button>
           </div>
