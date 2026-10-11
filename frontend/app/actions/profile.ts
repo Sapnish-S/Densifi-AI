@@ -19,7 +19,10 @@ export async function getProfile() {
   // Ensure gender column exists
   await query(`ALTER TABLE profile ADD COLUMN IF NOT EXISTS gender TEXT DEFAULT 'male'`)
   const res = await query(
-    `SELECT id, "userId", tier, "displayName", gender, "createdAt" FROM profile WHERE "userId" = $1 LIMIT 1`,
+    `SELECT p.id, p."userId", p.tier, p."displayName", p.gender, p."createdAt", COALESCE(u.role, 'patient') as role 
+     FROM profile p 
+     LEFT JOIN "user" u ON u.id = p."userId" 
+     WHERE p."userId" = $1 LIMIT 1`,
     [userId],
   )
   if (res.rows.length === 0) {
@@ -29,16 +32,35 @@ export async function getProfile() {
       `INSERT INTO profile (id, "userId", tier, "displayName", gender, "createdAt", "updatedAt") VALUES ($1, $2, $3, $4, 'male', now(), now())`,
       [id, userId, "free", null],
     )
-    return { id, userId, tier: "free" as const, displayName: null, gender: "male" as const }
+    return { id, userId, tier: "free" as const, displayName: null, gender: "male" as const, role: "patient" as "patient" | "doctor" }
   }
-  const row = res.rows[0] as { id: string; userId: string; tier: string; displayName: string | null; gender: string | null }
+  const row = res.rows[0] as { id: string; userId: string; tier: string; displayName: string | null; gender: string | null; role: string }
   return {
     id: row.id,
     userId: row.userId,
     tier: (row.tier ?? "free") as "free" | "premium",
     displayName: row.displayName ?? null,
     gender: (row.gender === "female" ? "female" : "male") as "male" | "female",
+    role: (row.role === "doctor" ? "doctor" : "patient") as "patient" | "doctor",
   }
+}
+
+export async function switchUserRole(newRole: "patient" | "doctor") {
+  const userId = await getUserId()
+  await query(`UPDATE "user" SET role = $1 WHERE id = $2`, [newRole, userId])
+  
+  if (newRole === "doctor") {
+    const docId = randomUUID()
+    await query(
+      `INSERT INTO doctor_profile (id, "userId", "licenseNumber", specialty, "clinicName", bio, verified, "createdAt", "updatedAt")
+       VALUES ($1, $2, 'MED-TRICH-9841', 'Trichology & Hair Restoration Specialist', 'Densify Clinical Research', 'Board-certified clinical trichologist specializing in androgenetic alopecia and follicle revitalization.', true, now(), now())
+       ON CONFLICT ("userId") DO NOTHING`,
+      [docId, userId]
+    )
+  }
+  revalidatePath("/")
+  revalidatePath("/doctor")
+  return { success: true, role: newRole }
 }
 
 export async function updateProfile(data: { displayName?: string; gender?: "male" | "female" }) {
