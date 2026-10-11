@@ -29,6 +29,14 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(verifyUrl);
     }
 
+    // ROLE-BASED ACCESS CONTROL (RBAC) ROUTE ENFORCEMENT:
+    if (sessionData?.user?.role === "doctor" && request.nextUrl.pathname === "/") {
+      return NextResponse.redirect(new URL("/doctor", request.url));
+    }
+    if (sessionData?.user?.role === "patient" && request.nextUrl.pathname.startsWith("/doctor")) {
+      return NextResponse.redirect(new URL("/", request.url));
+    }
+
   } catch (error) {
     // If the fetch fails for any reason (e.g. server error), safely redirect to login
     return NextResponse.redirect(new URL("/landing", request.url));
