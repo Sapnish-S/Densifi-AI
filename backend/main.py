@@ -4,8 +4,8 @@ Densify Core Engine — FastAPI service.
 Notes:
   * CORS origins come from CORS_ALLOW_ORIGINS.
   * Optional shared-secret check: when INTERNAL_API_SECRET is set, the routes
-    that only Next.js server actions call (/checkin, /analyze-lab, /agent-chat,
-    /dashboard/telemetry) require header X-Internal-Secret. Disabled when unset.
+    that only Next.js server actions call (/checkin, /analyze, /analyze-lab,
+    /agent-chat, /dashboard/telemetry) require header X-Internal-Secret. Disabled when unset.
 """
 
 from __future__ import annotations
@@ -185,7 +185,7 @@ def checkin(req: CheckinRequest):
 # ── AI ───────────────────────────────────────────────────────────────────────
 
 
-@app.post("/analyze")
+@app.post("/analyze", dependencies=[Depends(require_internal_secret)])
 def analyze(req: AnalyzeRequest):
     logger.info("Analysis requested by %s", req.user_id)
     result = analyzer.analyze_vault_image(req.baseline_s3_key, req.current_s3_key)

@@ -10,13 +10,11 @@ const PNG = Buffer.from(
   "base64",
 )
 
-/** Real upload through the app's presigned flow (vault-upload → PUT → vault-save). */
+/** Real upload through the app's server-side flow (vault-put → vault-save). */
 async function uploadPhoto(page: Page, view: "Front" | "Crown" | "Side", takenAt: string) {
-  const up = await page.request.post("/api/vault-upload", { data: { view, contentType: "image/png" } })
-  expect(up.ok()).toBeTruthy()
-  const { uploadUrl, key } = await up.json()
-  const put = await page.request.put(uploadUrl, { data: PNG, headers: { "Content-Type": "image/png" } })
-  expect(put.ok(), `PUT ${put.status()}`).toBeTruthy()
+  const put = await page.request.post(`/api/vault-put?view=${view}`, { data: PNG, headers: { "Content-Type": "image/png" } })
+  expect(put.ok(), `vault-put ${put.status()}`).toBeTruthy()
+  const { key } = await put.json()
   const save = await page.request.post("/api/vault-save", { data: { key, view, takenAt } })
   expect(save.ok()).toBeTruthy()
   return (await save.json()) as { id: string; s3Url: string }
@@ -44,7 +42,7 @@ test.describe("AI Agent — analysis", () => {
     await expect(page.getByText("We found your latest Front photo, but you need at least two Front photos to compare progress.")).toBeVisible()
   })
 
-  test("non-S3 photos → 'must be uploaded to S3' error", async ({ page }) => {
+  test("legacy inline (non-S3) photos are ignored by the comparison", async ({ page }) => {
     const user = await createUser(page)
     for (const d of ["2026-01-01", "2026-02-01"]) {
       await sql(
@@ -54,7 +52,7 @@ test.describe("AI Agent — analysis", () => {
     }
     await openAgent(page)
     await page.getByRole("button", { name: "Analyze Latest Progress" }).click()
-    await expect(page.getByText("Both Baseline and Latest photos must be uploaded to S3 to be analysed.")).toBeVisible()
+    await expect(page.getByText("You need at least two photos of the same view to perform a comparison analysis.")).toBeVisible()
   })
 
   test("missing objects → structured 422 surfaced as status error", async ({ page }) => {
@@ -66,27 +64,20 @@ test.describe("AI Agent — analysis", () => {
       )
     }
     await openAgent(page)
-    const resp = page.waitForResponse((r) => r.url().endsWith(":8000/analyze"))
+    // /analyze is called server-side (server action); its structured error message is surfaced.
     await page.getByRole("button", { name: "Analyze Latest Progress" }).click()
-    const r = await resp
-    expect(r.status()).toBe(422)
-    expect(await r.json()).toMatchObject({ error: true, error_code: "NoSuchKey", recoverable: false })
-    await expect(page.getByText("Analysis service returned 422")).toBeVisible()
+    await expect(page.getByText("Image not found or access denied for one of the keys. Verify the S3 keys and IAM permissions.")).toBeVisible({ timeout: 30_000 })
   })
 
-  test("analyze → report modal → results → saved to agent_message → forward (premium)", async ({ page }) => {
+  test("analyze compares the FIRST and LATEST photo of the same view → report modal → results → saved to agent_message → forward (premium)", async ({ page }) => {
     const user = await createUser(page, { tier: "premium" })
     await uploadPhoto(page, "Crown", "2026-01-05T10:00:00.000Z")   // older, different view (ignored)
-    const baseline = await uploadPhoto(page, "Front", "2026-01-10T10:00:00.000Z")
-    const current = await uploadPhoto(page, "Front", "2026-03-10T10:00:00.000Z")
+    const baseline = await uploadPhoto(page, "Front", "2026-01-10T10:00:00.000Z") // first Front
+    await uploadPhoto(page, "Front", "2026-02-10T10:00:00.000Z")                 // middle (ignored)
+    const current = await uploadPhoto(page, "Front", "2026-03-10T10:00:00.000Z") // latest
     await openAgent(page)
 
-    const req = page.waitForRequest((r) => r.url().endsWith(":8000/analyze"))
     await page.getByRole("button", { name: "Analyze Latest Progress" }).click()
-    const body = (await req).postDataJSON()
-    expect(body.user_id).toBe(user.id)
-    expect(body.baseline_s3_key).toBe(baseline.s3Url.replace("http://localhost:9000/densify-vault-storage/", ""))
-    expect(body.current_s3_key).toBe(current.s3Url.replace("http://localhost:9000/densify-vault-storage/", ""))
 
     const modal = page.getByRole("dialog")
     await expect(modal.getByText("Analysis Complete")).toBeVisible({ timeout: 30_000 })
@@ -98,6 +89,8 @@ test.describe("AI Agent — analysis", () => {
     await expect(page.getByText("Your scalp shows improved coverage with thicker follicles since baseline.").first()).toBeVisible()
     await expect(page.getByText("mock-vision → mock-fast")).toBeVisible()
     await expect(page.getByText("Drag to compare")).toBeVisible()
+    await expect(page.getByAltText("Baseline").first()).toHaveAttribute("src", baseline.s3Url)
+    await expect(page.getByAltText("Current progress").first()).toHaveAttribute("src", current.s3Url)
 
     const rows = await sql(`SELECT role, content, "photoId" FROM agent_message WHERE "userId" = $1`, [user.id])
     expect(rows).toHaveLength(1)
@@ -163,12 +156,15 @@ test.describe("AI Agent — follow-up chat", () => {
     await expect(page.getByAltText("Selected photo")).toBeVisible()
     await input.press("Enter")
     await expect(page.getByText("Please analyze my progress photo.", { exact: true })).toBeVisible()
-    await expect(page.getByText(/Mock trichologist reply to: .*Please analyze my progress photo\./)).toBeVisible({ timeout: 20_000 })
+    // Exact match: a regex with .* also matches a parent whose text joins the previous reply and
+    // the optimistic user message, passing before this reply has been written.
+    await expect(page.getByText("Mock trichologist reply to: Please analyze my progress photo.", { exact: true })).toBeVisible({ timeout: 20_000 })
 
+    // Chat photos are stored in the vault (object storage) as Crown captures.
     const photos = await sql(`SELECT angle, "dataUrl" FROM progress_photo WHERE "userId" = $1`, [user.id])
     expect(photos).toHaveLength(1)
-    expect(photos[0].angle).toBe("crown")
-    expect(photos[0].dataUrl.startsWith("data:image/png;base64,")).toBe(true)
+    expect(photos[0].angle).toBe("Crown")
+    expect(photos[0].dataUrl).toMatch(new RegExp(`/vault/${user.id}/\\d{4}-\\d{2}/Crown/[0-9a-f-]+\\.png$`))
     const msgs = await sql(`SELECT role, content, "photoId" FROM agent_message WHERE "userId" = $1 ORDER BY "createdAt"`, [user.id])
     expect(msgs.map((m) => m.role)).toEqual(["assistant", "user", "assistant", "user", "assistant"])
     // Premium: no daily count row

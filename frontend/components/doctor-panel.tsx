@@ -115,14 +115,17 @@ export function DoctorPanel({ report }: { report?: any }) {
   const handleBook = async (docId: string, docName: string) => {
     setBookingLoading(docId)
     try {
-      const isLocal = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+      // The session hook may not have resolved yet on a quick click; fetch it rather than
+      // booking under a placeholder address (the confirmation email would never arrive).
+      const email = session?.user?.email ?? (await authClient.getSession()).data?.user?.email
+      if (!email) throw new Error("No signed-in user")
       const baseApiUrl = getPublicApiUrl();
       const apiUrl = baseApiUrl.replace(/\/+$/, "");
       await fetch(`${apiUrl}/api/appointments/book`, {
         method: 'POST',
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          email: session?.user?.email || "patient@example.com",
+          email,
           doctor_name: docName,
           date_time: new Date().toISOString().split("T")[0] + " 09:00:00"
         })

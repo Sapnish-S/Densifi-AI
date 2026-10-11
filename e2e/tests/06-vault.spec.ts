@@ -185,7 +185,7 @@ test.describe("Direct Capture dialog", () => {
 
     await uploadFrontFromDevice(page)
     // Terminal state (success is covered by the fixme'd round-trip test below).
-    await expect(captureRow(page, "Front")).toContainText(/Captured & uploaded|Upload failed — tap to retry/, { timeout: 15_000 })
+    await expect(captureRow(page, "Front")).toContainText(/Captured & uploaded|tap to retry/, { timeout: 15_000 })
 
     await dlg.getByRole("button", { name: "Done" }).click()
     await expect(dlg).toBeHidden()

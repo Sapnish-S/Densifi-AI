@@ -60,7 +60,9 @@ export async function POST(req: NextRequest) {
     await s3Client.send(new PutObjectCommand({ Bucket: BUCKET, Key: key, ContentType: contentType, Body: body }))
   } catch (e) {
     console.error("vault-put: S3 upload failed", e)
-    return NextResponse.json({ error: "Upload to storage failed." }, { status: 502 })
+    // Surface the storage error code (e.g. AccessDenied, NoSuchBucket) so failures are diagnosable.
+    const code = e instanceof Error && e.name !== "Error" ? ` (${e.name})` : ""
+    return NextResponse.json({ error: `Upload to storage failed${code}.` }, { status: 502 })
   }
 
   return NextResponse.json({ key })

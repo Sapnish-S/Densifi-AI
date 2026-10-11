@@ -209,14 +209,19 @@ export interface VaultMonth {
 
 // ── Vault photos — fetched directly from PostgreSQL ──────────────────────────
 // DB columns (camelCase, quoted): "userId", "dataUrl", angle, "takenAt", "createdAt"
-// vault-save also writes s3_key into a separate column — select both and prefer s3_key.
+// vault-save stores the object's public URL in "dataUrl"; the S3 key is recovered from it.
 
 function extractS3Key(dataUrl: string): string | null {
-  if (!dataUrl) return null
-  // Akamai Object Storage: strip the configured public base URL prefix.
-  const base = (process.env.S3_PUBLIC_BASE_URL || process.env.NEXT_PUBLIC_S3_PUBLIC_BASE_URL || "").replace(/\/+$/, "")
-  if (base && dataUrl.startsWith(base + "/")) return dataUrl.slice(base.length + 1)
-  return null
+  if (!/^https?:\/\//.test(dataUrl)) return null // legacy inline data: URLs have no object
+  // Object keys always start with vault/ (see /api/vault-put). Matching on the path keeps
+  // this working whatever public base URL / path style the row was written with.
+  try {
+    const path = decodeURIComponent(new URL(dataUrl).pathname)
+    const i = path.indexOf("/vault/")
+    return i >= 0 ? path.slice(i + 1) : null
+  } catch {
+    return null
+  }
 }
 
 export async function getVaultMonths(): Promise<VaultMonth[]> {
@@ -358,22 +363,30 @@ export interface AnalysisError {
   recoverable: boolean
 }
 
-export async function analyzeVaultImage(s3Key: string): Promise<AnalysisResult | AnalysisError> {
+export async function analyzeVaultImage(
+  baselineS3Key: string,
+  currentS3Key: string,
+): Promise<AnalysisResult | AnalysisError> {
   const userId = await getUserId()
+  // BOLA guard: both images must live under this user's vault prefix.
+  const prefix = `vault/${userId}/`
+  if (!baselineS3Key?.startsWith(prefix) || !currentS3Key?.startsWith(prefix)) {
+    return { error: true, error_code: "FORBIDDEN", error_message: "Those photos don't belong to your vault.", recoverable: false }
+  }
   try {
     const res = await fetch(`${FASTAPI_BASE}/analyze`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...internalApiHeaders() },
-      body: JSON.stringify({ user_id: userId, s3_key: s3Key }),
+      body: JSON.stringify({ user_id: userId, baseline_s3_key: baselineS3Key, current_s3_key: currentS3Key }),
       cache: "no-store",
     })
-    
+    const body = await res.json().catch(() => null)
     if (!res.ok) {
-      console.error(`[telemetry] analyzeVaultImage API returned ${res.status}:`, await res.text().catch(() => "no body"))
-      return { error: true, error_code: "API_ERROR", error_message: `Analysis service returned ${res.status}`, recoverable: false }
+      console.error(`[telemetry] analyzeVaultImage API returned ${res.status}:`, body)
+      if (body?.error) return body as AnalysisError
+      return { error: true, error_code: "API_ERROR", error_message: `Analysis service returned ${res.status}`, recoverable: res.status >= 500 }
     }
-    
-    return await res.json() as Promise<AnalysisResult | AnalysisError>
+    return body as AnalysisResult
   } catch (err) {
     console.error("[telemetry] analyzeVaultImage failed:", err)
     return { error: true, error_code: "FETCH_FAILED", error_message: "Could not reach analysis service", recoverable: true }
