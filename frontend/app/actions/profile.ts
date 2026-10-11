@@ -16,33 +16,41 @@ async function getUserId(): Promise<string> {
 
 export async function getProfile() {
   const userId = await getUserId()
+  // Ensure gender column exists
+  await query(`ALTER TABLE profile ADD COLUMN IF NOT EXISTS gender TEXT DEFAULT 'male'`)
   const res = await query(
-    `SELECT id, "userId", tier, "displayName", "createdAt" FROM profile WHERE "userId" = $1 LIMIT 1`,
+    `SELECT id, "userId", tier, "displayName", gender, "createdAt" FROM profile WHERE "userId" = $1 LIMIT 1`,
     [userId],
   )
   if (res.rows.length === 0) {
     // Auto-create profile on first access
     const id = randomUUID()
     await query(
-      `INSERT INTO profile (id, "userId", tier, "displayName", "createdAt", "updatedAt") VALUES ($1, $2, $3, $4, now(), now())`,
+      `INSERT INTO profile (id, "userId", tier, "displayName", gender, "createdAt", "updatedAt") VALUES ($1, $2, $3, $4, 'male', now(), now())`,
       [id, userId, "free", null],
     )
-    return { id, userId, tier: "free" as const, displayName: null }
+    return { id, userId, tier: "free" as const, displayName: null, gender: "male" as const }
   }
-  const row = res.rows[0] as { id: string; userId: string; tier: string; displayName: string | null }
+  const row = res.rows[0] as { id: string; userId: string; tier: string; displayName: string | null; gender: string | null }
   return {
     id: row.id,
     userId: row.userId,
     tier: (row.tier ?? "free") as "free" | "premium",
     displayName: row.displayName ?? null,
+    gender: (row.gender === "female" ? "female" : "male") as "male" | "female",
   }
 }
 
-export async function updateProfile(data: { displayName?: string }) {
+export async function updateProfile(data: { displayName?: string; gender?: "male" | "female" }) {
   const userId = await getUserId()
+  await query(`ALTER TABLE profile ADD COLUMN IF NOT EXISTS gender TEXT DEFAULT 'male'`)
   await query(
-    `UPDATE profile SET "displayName" = COALESCE($1, "displayName"), "updatedAt" = now() WHERE "userId" = $2`,
-    [data.displayName ?? null, userId],
+    `UPDATE profile SET 
+       "displayName" = COALESCE($1, "displayName"), 
+       gender = COALESCE($2, gender),
+       "updatedAt" = now() 
+     WHERE "userId" = $3`,
+    [data.displayName ?? null, data.gender ?? null, userId],
   )
   revalidatePath("/")
 }

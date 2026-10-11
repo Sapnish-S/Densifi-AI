@@ -23,6 +23,7 @@ export type CaptureView = "Front" | "Crown" | "Side"
 
 interface BiometricScannerProps {
   view: CaptureView
+  gender?: "male" | "female"
   onCapture: (blob: Blob, view: CaptureView) => void
   onClose: () => void
 }
@@ -166,7 +167,7 @@ function sampleLuminance(ctx: CanvasRenderingContext2D, w: number, h: number): n
 // Main component
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function BiometricScanner({ view, onCapture, onClose }: BiometricScannerProps) {
+export function BiometricScanner({ view, gender = "male", onCapture, onClose }: BiometricScannerProps) {
   const videoRef   = useRef<HTMLVideoElement>(null)
   const canvasRef  = useRef<HTMLCanvasElement>(null)
   const streamRef  = useRef<MediaStream | null>(null)
@@ -334,11 +335,27 @@ export function BiometricScanner({ view, onCapture, onClose }: BiometricScannerP
       </div>
 
       {/* Status HUD — top */}
-      <div className="absolute top-0 inset-x-0 flex flex-col items-center gap-1 pt-14 pb-6 pointer-events-none">
+      <div className="absolute top-0 inset-x-0 flex flex-col items-center gap-1.5 pt-12 pb-6 pointer-events-none">
+        {/* Scale calibration badge */}
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-[9px] font-semibold tracking-[0.22em] uppercase text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded-xs backdrop-blur-sm">
+            {gender === "male" ? "Norwood Scale · 7 Stages" : "Ludwig Scale · 3 Stages"}
+          </span>
+        </div>
+
         {/* View label */}
         <p className="font-mono text-[9px] font-semibold tracking-[0.32em] uppercase text-white/50">
           Biometric Capture — {view} View
         </p>
+
+        {/* View-specific staging anatomical guidance */}
+        <p className="font-mono text-[9px] tracking-wider uppercase text-white/60 text-center max-w-sm px-4">
+          {gender === "male"
+            ? (view === "Front" ? "Targeting hairline & temporal recession (Stages 1–7)" : view === "Crown" ? "Targeting vertex diameter & mid-scalp bridge (Stages 3–7)" : "Targeting lateral border & temporal recession")
+            : (view === "Front" ? "Targeting frontal midline part width (Stages I–III)" : view === "Crown" ? "Targeting diffuse crown thinning & scalp visibility (Stages I–III)" : "Targeting lateral parietal hair preservation")
+          }
+        </p>
+
         {/* Status badge */}
         <div
           className={cn(
@@ -381,8 +398,13 @@ export function BiometricScanner({ view, onCapture, onClose }: BiometricScannerP
 
       {/* Captured success icon */}
       {status === "captured" && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none gap-3">
           <CheckCircle2 className="h-16 w-16 text-[oklch(0.88_0.14_145)] drop-shadow-[0_0_24px_oklch(0.88_0.14_145/0.6)] animate-in zoom-in duration-300" />
+          <div className="flex flex-col items-center bg-black/80 backdrop-blur-md px-4 py-2 rounded-sm border border-[oklch(0.88_0.14_145/0.4)]">
+            <span className="font-mono text-[10px] font-bold uppercase tracking-[0.25em] text-[oklch(0.88_0.14_145)]">
+              {gender === "male" ? "Norwood 7-Stage Calibration Complete" : "Ludwig 3-Stage Calibration Complete"}
+            </span>
+          </div>
         </div>
       )}
 

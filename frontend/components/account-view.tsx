@@ -12,14 +12,18 @@ import { cn } from "@/lib/utils"
 interface AccountViewProps {
   user: { name: string; email: string }
   tier: "free" | "premium"
+  gender?: "male" | "female"
+  onGenderChange?: (gender: "male" | "female") => void
   onUpgrade: () => void
 }
 
-export function AccountView({ user, tier, onUpgrade }: AccountViewProps) {
+export function AccountView({ user, tier, gender = "male", onGenderChange, onUpgrade }: AccountViewProps) {
   const router = useRouter()
   const [editingName, setEditingName] = useState(false)
   const [name, setName] = useState(user.name)
   const [savingName, setSavingName] = useState(false)
+  const [selectedGender, setSelectedGender] = useState<"male" | "female">(gender)
+  const [savingGender, setSavingGender] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
 
   async function handleSaveName() {
@@ -29,6 +33,17 @@ export function AccountView({ user, tier, onUpgrade }: AccountViewProps) {
       setEditingName(false)
     } finally {
       setSavingName(false)
+    }
+  }
+
+  async function handleSelectGender(g: "male" | "female") {
+    setSelectedGender(g)
+    onGenderChange?.(g)
+    setSavingGender(true)
+    try {
+      await updateProfile({ gender: g })
+    } finally {
+      setSavingGender(false)
     }
   }
 
@@ -91,6 +106,55 @@ export function AccountView({ user, tier, onUpgrade }: AccountViewProps) {
                 </button>
               </div>
             )}
+          </div>
+
+          {/* Clinical Staging Scale Selection */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-[9px] font-semibold tracking-[0.18em] uppercase text-muted-foreground">
+                Clinical Staging Scale (Biological Classification)
+              </label>
+              {savingGender && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => handleSelectGender("male")}
+                className={cn(
+                  "p-3 rounded-sm border text-left transition-all",
+                  selectedGender === "male"
+                    ? "border-foreground bg-foreground/8 shadow-xs"
+                    : "border-border/40 bg-card/40 hover:border-border/80 text-muted-foreground",
+                )}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-foreground">Male Pattern</span>
+                  {selectedGender === "male" && <Check className="h-3.5 w-3.5 text-foreground" />}
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Norwood-Hamilton Scale (7 Stages: I–VII)
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleSelectGender("female")}
+                className={cn(
+                  "p-3 rounded-sm border text-left transition-all",
+                  selectedGender === "female"
+                    ? "border-foreground bg-foreground/8 shadow-xs"
+                    : "border-border/40 bg-card/40 hover:border-border/80 text-muted-foreground",
+                )}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-foreground">Female Pattern</span>
+                  {selectedGender === "female" && <Check className="h-3.5 w-3.5 text-foreground" />}
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Ludwig Scale (3 Stages: I–III Midline)
+                </p>
+              </button>
+            </div>
           </div>
 
           {/* Email (read-only) */}
