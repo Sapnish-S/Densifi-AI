@@ -15,7 +15,6 @@ import { NotificationEngine } from "@/components/notification-engine"
 import { CampaignTutorial, type CampaignTutorialHandle } from "@/components/campaign-tutorial"
 import { DoctorPanel } from "@/components/doctor-panel"
 import { UpgradeView } from "@/components/upgrade-view"
-import type { AnalysisResult } from "@/app/actions/telemetry"
 
 type ViewId = "overview" | "clinical" | "doctor" | "vault" | "agent" | "account" | "upgrade" | "notifications"
 
@@ -67,7 +66,6 @@ export function DashboardClient({ user, tier: initialTier, gender: initialGender
   const [tier, setTier] = useState(initialTier)
   const [gender, setGender] = useState<"male" | "female">(initialGender)
   const [vaultCaptureOpen, setVaultCaptureOpen] = useState(false)
-  const [forwardedReport, setForwardedReport] = useState<AnalysisResult | null>(null)
   
   // Track tour states locally
   const [hasSeenFreeTour, setHasSeenFreeTour] = useState(hasCompletedOnboarding)
@@ -112,8 +110,7 @@ export function DashboardClient({ user, tier: initialTier, gender: initialGender
     setView("overview")
   }
 
-  function handleForwardReport(report: AnalysisResult) {
-    setForwardedReport(report)
+  function handleShareWithDoctor() {
     setView("doctor")
   }
 
@@ -179,7 +176,7 @@ export function DashboardClient({ user, tier: initialTier, gender: initialGender
           {/* DOCTOR NETWORK — Gated */}
           {view === "doctor" && (
             <ProGate tier={tier} feature="Doctor Network" onUpgrade={handleUpgrade}>
-              <DoctorPanel report={forwardedReport} />
+              <DoctorPanel />
             </ProGate>
           )}
 
@@ -200,7 +197,7 @@ export function DashboardClient({ user, tier: initialTier, gender: initialGender
               gender={gender}
               onGenderChange={setGender}
               onUpgrade={handleUpgrade} 
-              onForwardReport={handleForwardReport} 
+              onShareWithDoctor={handleShareWithDoctor} 
             />
           )}
 

@@ -1,152 +1,193 @@
-import { expect, test, type Page } from "@playwright/test"
-import { createUser } from "./helpers"
-import { openView } from "./helpers-vault"
+import { expect, test, type Browser, type Page } from "@playwright/test"
+import { createUser, sql, uniqueEmail, type TestUser } from "./helpers"
+import { openView, seedPhoto } from "./helpers-vault"
 
-// Doctors view (05 §11) — Pro-only behind ProGate "Doctor Network". All chat state is client-side.
+// Doctors: "I'm a doctor" sign-up/sign-in, the patient's doctor directory (Pro-only behind
+// ProGate "Doctor Network"), patient-controlled sharing, and the doctor portal at /doctor.
 
-const INITIAL_DOCTOR_MSG =
-  "Hello, I saw your consultation request. Could you please forward your latest Bedrock AI density report?"
+const tag = () => Math.random().toString(36).slice(2, 8)
+
+/** A verified doctor created through the real sign-up hook, in its own browser context. */
+async function createDoctor(browser: Browser, opts: { verified?: boolean } = {}) {
+  const ctx = await browser.newContext()
+  const page = await ctx.newPage()
+  const doctor = await createUser(page, { doctor: true, name: `Dr. Test ${tag()}`, verified: opts.verified })
+  return { doctor, page, close: () => ctx.close() }
+}
 
 function card(page: Page, name: string) {
   return page.locator('[data-slot="card"]').filter({ has: page.getByRole("heading", { name }) })
 }
 
-function toast(page: Page, text: string) {
-  return page.locator("div.absolute.top-4").filter({ hasText: text })
+async function link(doctorId: string, patientId: string) {
+  const [row] = await sql(
+    `SELECT status, "vaultAccessGranted", "labAccessGranted" FROM doctor_patient WHERE "doctorId" = $1 AND "patientId" = $2`,
+    [doctorId, patientId],
+  )
+  return row
 }
 
-test.describe("Doctors (premium)", () => {
-  test("directory: three specialists, doc-1 pre-booked, tabs", async ({ page }) => {
-    await createUser(page, { tier: "premium" })
-    await openView(page, "doctor")
+test.describe("I'm a doctor checkbox", () => {
+  test("sign-up with the box ticked creates a doctor with a doctor_profile", async ({ page }) => {
+    const email = uniqueEmail("doc-signup")
+    await page.goto("/sign-up")
+    await page.getByPlaceholder("Marcus Reed").fill("Dr. Signup")
+    await page.getByPlaceholder("you@example.com").fill(email)
+    await page.locator("#password").fill("Densify-Test-Pass1")
+    await page.getByLabel(/I'm a doctor/).check()
+    await page.getByRole("button", { name: "Create account" }).click()
+    // Doctors still verify their email.
+    await expect(page).toHaveURL(`/verify?email=${encodeURIComponent(email)}`)
 
-    await expect(page.getByRole("button", { name: "Find a Specialist" })).toBeVisible()
-    await expect(page.getByRole("button", { name: /Messages/ })).toContainText("1")
-    await expect(page.getByRole("heading", { name: "Specialist Directory" })).toBeVisible()
-    await expect(
-      page.getByText("Connect with top-tier hair restoration professionals to review your AI metrics."),
-    ).toBeVisible()
-
-    const specs = [
-      ["Dr. E. Butler", "Hair Restoration Specialist", "5.0", "EB"],
-      ["Dr. L. Mehl", "Dermatologist & Trichologist", "4.9", "LM"],
-      ["Dr. U. Sitaula", "Scalp Specialist", "5.0", "US"],
-    ] as const
-    for (const [name, specialty, rating, initials] of specs) {
-      const c = card(page, name)
-      await expect(c).toBeVisible()
-      await expect(c).toContainText(specialty)
-      await expect(c).toContainText(rating)
-      await expect(c).toContainText(initials)
-      await expect(c).toContainText("$150 / consult")
-    }
-    await expect(page.getByText("$150 / consult")).toHaveCount(3)
-
-    // doc-1 starts booked.
-    await expect(card(page, "Dr. E. Butler")).toContainText("Booked")
-    await expect(card(page, "Dr. E. Butler").getByRole("button", { name: "Message Doctor" })).toBeVisible()
-    await expect(card(page, "Dr. L. Mehl").getByRole("button", { name: "Book Consultation" })).toBeVisible()
-    await expect(card(page, "Dr. U. Sitaula").getByRole("button", { name: "Book Consultation" })).toBeVisible()
-
-    // Messages tab: Active Consultations + the doctor's opening message.
-    await page.getByRole("button", { name: /Messages/ }).click()
-    await expect(page.getByRole("heading", { name: "Active Consultations" })).toBeVisible()
-    await expect(page.getByRole("heading", { name: "Dr. E. Butler" })).toBeVisible()
-    await expect(page.getByText(INITIAL_DOCTOR_MSG)).toBeVisible()
-    await expect(page.getByText("Tap to view conversation...")).toBeVisible()
-
-    await page.getByRole("button", { name: "Find a Specialist" }).click()
-    await expect(page.getByRole("heading", { name: "Specialist Directory" })).toBeVisible()
-    await card(page, "Dr. E. Butler").getByRole("button", { name: "Message Doctor" }).click()
-    await expect(page.getByText(INITIAL_DOCTOR_MSG)).toBeVisible()
-  })
-
-  test("Book Consultation → backend call, toast, Messages tab", async ({ page }) => {
-    const user = await createUser(page, { tier: "premium" })
-    await openView(page, "doctor")
-
-    const bookReq = page.waitForRequest(
-      (r) => r.method() === "POST" && r.url() === "http://localhost:8000/api/appointments/book",
+    const [u] = await sql(
+      `SELECT u.role, (SELECT count(*)::int FROM doctor_profile d WHERE d."userId" = u.id) AS doc,
+              (SELECT count(*)::int FROM profile p WHERE p."userId" = u.id) AS prof
+       FROM "user" u WHERE email = $1`,
+      [email],
     )
-    const btn = card(page, "Dr. L. Mehl").getByRole("button", { name: "Book Consultation" })
-    await btn.click()
-    await expect(card(page, "Dr. L. Mehl").getByRole("button", { name: "Booking..." })).toBeVisible()
-
-    const req = await bookReq
-    const today = new Date().toISOString().split("T")[0]
-    expect(req.postDataJSON()).toEqual({ email: user.email, doctor_name: "Dr. L. Mehl", date_time: `${today} 09:00:00` })
-    expect(req.headers()["content-type"]).toBe("application/json")
-
-    await expect(toast(page, "Successfully booked consultation with Dr. L. Mehl")).toBeVisible()
-    // Switched to Messages with the new chat active (empty — no doctor reply).
-    await expect(page.getByRole("heading", { name: "Active Consultations" })).toBeVisible()
-    await expect(page.getByRole("button", { name: /Messages/ })).toContainText("2")
-    await expect(page.getByRole("heading", { name: "Dr. L. Mehl" })).toBeVisible()
-    await expect(page.getByText("Dermatologist & Trichologist").last()).toBeVisible()
-    await expect(page.getByText("Start a new conversation")).toBeVisible()
-    await expect(page.getByText(INITIAL_DOCTOR_MSG)).toHaveCount(0)
-    // Toast clears after 3 s.
-    await expect(toast(page, "Successfully booked consultation with Dr. L. Mehl")).toBeHidden({ timeout: 5_000 })
-
-    await page.getByRole("button", { name: "Find a Specialist" }).click()
-    await expect(card(page, "Dr. L. Mehl")).toContainText("Booked")
-    await expect(card(page, "Dr. L. Mehl").getByRole("button", { name: "Message Doctor" })).toBeVisible()
+    expect(u).toEqual({ role: "doctor", doc: 1, prof: 0 })
   })
 
-  test("Vault Access toggle, Attach Report, send message (no doctor reply)", async ({ page }) => {
+  test("sign-up without the box creates a patient with a profile", async ({ page }) => {
+    const user = await createUser(page)
+    const [u] = await sql(
+      `SELECT u.role, (SELECT count(*)::int FROM doctor_profile d WHERE d."userId" = u.id) AS doc,
+              (SELECT count(*)::int FROM profile p WHERE p."userId" = u.id) AS prof
+       FROM "user" u WHERE id = $1`,
+      [user.id],
+    )
+    expect(u).toEqual({ role: "patient", doc: 0, prof: 1 })
+  })
+
+  test("doctor signs in with the box ticked → doctor portal", async ({ page, browser }) => {
+    const { doctor, close } = await createDoctor(browser)
+    await close()
+    await page.goto("/sign-in")
+    await page.getByLabel(/I'm a doctor/).check()
+    await page.getByLabel("Email address").fill(doctor.email)
+    await page.locator("#password").fill(doctor.password)
+    await page.getByRole("button", { name: "Sign in", exact: true }).click()
+    await expect(page).toHaveURL("/doctor")
+    await expect(page.getByText("No patients are linked to your account yet.")).toBeVisible()
+  })
+
+  test("patient with the box ticked is refused", async ({ page, browser }) => {
+    const ctx = await browser.newContext()
+    const patient = await createUser(await ctx.newPage())
+    await ctx.close()
+    await page.goto("/sign-in")
+    await page.getByLabel(/I'm a doctor/).check()
+    await page.getByLabel("Email address").fill(patient.email)
+    await page.locator("#password").fill(patient.password)
+    await page.getByRole("button", { name: "Sign in", exact: true }).click()
+    await expect(page.getByText("This account isn't registered as a doctor.", { exact: false })).toBeVisible()
+    await expect(page).toHaveURL("/sign-in")
+  })
+
+  test("role routing: patients can't open /doctor, doctors are sent there from /", async ({ page, browser }) => {
+    await createUser(page)
+    const asPatient = await page.request.get("/doctor", { maxRedirects: 0 })
+    expect(asPatient.status()).toBe(307)
+    expect(new URL(asPatient.headers()["location"], "http://x").pathname).toBe("/")
+
+    const { page: docPage, close } = await createDoctor(browser)
+    const asDoctor = await docPage.request.get("/", { maxRedirects: 0 })
+    expect(asDoctor.status()).toBe(307)
+    expect(new URL(asDoctor.headers()["location"], "http://x").pathname).toBe("/doctor")
+    await close()
+  })
+})
+
+test.describe("Doctor directory (premium patient)", () => {
+  test("connect with chosen sharing → change sharing → disconnect", async ({ page, browser }) => {
+    const { doctor, close } = await createDoctor(browser)
+    await close()
+    const patient = await createUser(page, { tier: "premium" })
+    await openView(page, "doctor")
+
+    await page.getByPlaceholder("Search by name, specialty or clinic").fill(doctor.name)
+    await card(page, doctor.name).getByRole("button", { name: "Connect" }).click()
+
+    // Consent dialog: nothing ticked by default.
+    const dialog = page.getByRole("dialog")
+    await expect(dialog.getByText(`Connect with ${doctor.name}`)).toBeVisible()
+    await expect(dialog.getByLabel(/Progress photos/)).not.toBeChecked()
+    await expect(dialog.getByLabel(/Lab reports/)).not.toBeChecked()
+    await dialog.getByLabel(/Progress photos/).check()
+    await dialog.getByRole("button", { name: "Connect" }).click()
+
+    await expect(page.getByText(`Connected with ${doctor.name}`)).toBeVisible()
+    await expect(page.getByRole("heading", { name: "My doctors" })).toBeVisible()
+    expect(await link(doctor.id, patient.id)).toEqual({ status: "active", vaultAccessGranted: true, labAccessGranted: false })
+
+    await page.getByLabel(`Share lab reports with ${doctor.name}`).check()
+    await expect.poll(async () => (await link(doctor.id, patient.id)).labAccessGranted).toBe(true)
+
+    await card(page, doctor.name).getByRole("button", { name: "Disconnect" }).click()
+    await expect(page.getByText(`Disconnected from ${doctor.name}`)).toBeVisible()
+    expect(await link(doctor.id, patient.id)).toEqual({ status: "concluded", vaultAccessGranted: false, labAccessGranted: false })
+    // Back in the directory.
+    await expect(card(page, doctor.name).getByRole("button", { name: "Connect" })).toBeVisible()
+  })
+
+  test("unverified doctors are not listed", async ({ page, browser }) => {
+    const { doctor, close } = await createDoctor(browser, { verified: false })
+    await close()
     await createUser(page, { tier: "premium" })
     await openView(page, "doctor")
-    await page.getByRole("button", { name: /Messages/ }).click()
-    await expect(page.getByText(INITIAL_DOCTOR_MSG)).toBeVisible()
+    await page.getByPlaceholder("Search by name, specialty or clinic").fill(doctor.name)
+    await expect(page.getByText("No doctors match your search.")).toBeVisible()
+  })
 
-    await expect(page.getByText("Vault Access", { exact: true })).toBeVisible()
-    const sw = page.getByRole("switch")
-    await expect(sw).toHaveAttribute("aria-checked", "false")
-    await sw.click()
-    await expect(sw).toHaveAttribute("aria-checked", "true")
-    await expect(page.getByText("You granted this specialist access to your encrypted Progression Vault.")).toBeVisible()
-    await expect(toast(page, "Clinical Access Granted")).toBeVisible()
-
-    await sw.click()
-    await expect(sw).toHaveAttribute("aria-checked", "false")
-    await expect(page.getByText("You revoked this specialist's access to your Progression Vault.")).toBeVisible()
-    await expect(toast(page, "Clinical Access Revoked")).toBeVisible()
-
-    // Attach Report → report card with fallback values.
-    await page.getByRole("button", { name: "Attach Report" }).click()
-    await expect(toast(page, "Report securely attached to chat.")).toBeVisible()
-    const report = page.locator("div.max-w-\\[280px\\]").filter({ hasText: "Bedrock AI Report" })
-    await expect(report).toHaveCount(1)
-    await expect(report).toContainText("Density")
-    await expect(report).toContainText("30%")
-    await expect(report).toContainText("Miniaturization")
-    await expect(report).toContainText("0.7")
-    await expect(report).not.toContainText("Clinical Summary")
-
-    // Typing + Enter appends a user bubble; no reply is generated.
-    const input = page.getByPlaceholder("Type a message...")
-    await input.fill("When should I schedule my follow-up scan?")
-    await input.press("Enter")
-    const bubble = page.locator("div.bg-primary.rounded-br-sm", { hasText: "When should I schedule my follow-up scan?" })
-    await expect(bubble).toBeVisible()
-    await expect(input).toHaveValue("")
-    // Whitespace-only is ignored.
-    await input.fill("   ")
-    await input.press("Enter")
-    await page.waitForTimeout(1500)
-    await expect(page.locator("div.bg-primary.rounded-br-sm")).toHaveCount(1)
-    await expect(page.locator("div.bg-muted.rounded-bl-sm")).toHaveCount(1) // only the initial doctor message
+  test("free user sees ProGate: Unlock Doctor Network", async ({ page }) => {
+    await createUser(page, { tier: "free" })
+    await openView(page, "doctor")
+    await expect(page.getByText("Pro Feature")).toBeVisible()
+    await expect(page.getByText("Unlock Doctor Network")).toBeVisible()
+    await page.getByRole("button", { name: "Upgrade to Pro", exact: true }).click()
+    await expect(page.getByRole("heading", { name: "Upgrade to Pro" }).first()).toBeVisible()
   })
 })
 
-test("free user sees ProGate: Unlock Doctor Network", async ({ page }) => {
-  await createUser(page, { tier: "free" })
-  await openView(page, "doctor")
-  await expect(page.getByText("Pro Feature")).toBeVisible()
-  await expect(page.getByText("Unlock Doctor Network")).toBeVisible()
-  await expect(
-    page.getByText("Upgrade to Densify Pro for the full clinical analytics suite, unlimited AI, and complete biomarker tracking."),
-  ).toBeVisible()
-  await page.getByRole("button", { name: "Upgrade to Pro", exact: true }).click()
-  await expect(page.getByRole("heading", { name: "Upgrade to Pro" }).first()).toBeVisible()
+test.describe("Doctor portal", () => {
+  async function linkedPair(page: Page, browser: Browser, sharing: { photos: boolean; labs: boolean }) {
+    const pctx = await browser.newContext()
+    const patient: TestUser = await createUser(await pctx.newPage(), { name: `Patient ${tag()}` })
+    await pctx.close()
+    const doctor = await createUser(page, { doctor: true, name: `Dr. Test ${tag()}` })
+    await sql(
+      `INSERT INTO doctor_patient (id, "doctorId", "patientId", status, "vaultAccessGranted", "labAccessGranted")
+       VALUES (gen_random_uuid()::text, $1, $2, 'active', $3, $4)`,
+      [doctor.id, patient.id, sharing.photos, sharing.labs],
+    )
+    return { doctor, patient }
+  }
+
+  test("shows only what the patient shared, and follows changes", async ({ page, browser }) => {
+    const { doctor, patient } = await linkedPair(page, browser, { photos: true, labs: false })
+    await seedPhoto(patient.id, "Crown", "2026-02-01T10:00:00.000Z")
+
+    await page.goto("/doctor")
+    await page.getByRole("button", { name: new RegExp(patient.name) }).click()
+    await expect(page.getByRole("heading", { name: patient.name })).toBeVisible()
+    await expect(page.getByAltText("Crown")).toBeVisible()
+    await expect(page.getByText("The patient hasn't shared this with you.")).toHaveCount(1) // labs
+
+    // Patient turns photos off: the server action itself stops returning them.
+    await sql(`UPDATE doctor_patient SET "vaultAccessGranted" = false WHERE "doctorId" = $1 AND "patientId" = $2`, [doctor.id, patient.id])
+    await page.reload()
+    await page.getByRole("button", { name: new RegExp(patient.name) }).click()
+    await expect(page.getByText("The patient hasn't shared this with you.")).toHaveCount(2)
+    await expect(page.getByAltText("Crown")).toHaveCount(0)
+  })
+
+  test("disconnected patients disappear from the caseload", async ({ page, browser }) => {
+    const { doctor, patient } = await linkedPair(page, browser, { photos: true, labs: true })
+    await page.goto("/doctor")
+    await expect(page.getByRole("button", { name: new RegExp(patient.name) })).toBeVisible()
+    await sql(`UPDATE doctor_patient SET status = 'concluded' WHERE "doctorId" = $1 AND "patientId" = $2`, [doctor.id, patient.id])
+    await page.reload()
+    await expect(page.getByText("No patients are linked to your account yet.")).toBeVisible()
+  })
 })
+

@@ -1,6 +1,7 @@
 import { betterAuth } from "better-auth"
-import { pool } from "@/lib/db"
+import { pool, query } from "@/lib/db"
 import { hashSync, compareSync } from "bcrypt-ts"
+import { randomUUID } from "crypto"
 
 // Base URL comes from explicit env configuration.
 const baseURL = process.env.BETTER_AUTH_URL ?? "http://localhost:3000"
@@ -18,10 +19,36 @@ export const auth = betterAuth({
   trustedOrigins,
   user: {
     additionalFields: {
+      // input: false keeps role out of update-user; it is only set at sign-up (hook below).
       role: {
         type: "string",
         defaultValue: "patient",
         input: false,
+      },
+    },
+  },
+  databaseHooks: {
+    user: {
+      create: {
+        // Sign-up form sends accountType: "doctor" when "I'm a doctor" is ticked.
+        before: async (user, ctx) => {
+          const role = ctx?.body?.accountType === "doctor" ? "doctor" : "patient"
+          return { data: { ...user, role } }
+        },
+        // Each role gets its own profile row: patients → profile, doctors → doctor_profile.
+        after: async (user) => {
+          if (user.role === "doctor") {
+            await query(
+              `INSERT INTO doctor_profile (id, "userId") VALUES ($1, $2) ON CONFLICT ("userId") DO NOTHING`,
+              [randomUUID(), user.id],
+            )
+          } else {
+            await query(
+              `INSERT INTO profile (id, "userId", tier) VALUES ($1, $2, 'free') ON CONFLICT ("userId") DO NOTHING`,
+              [randomUUID(), user.id],
+            )
+          }
+        },
       },
     },
   },
