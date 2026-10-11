@@ -310,8 +310,10 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
     setLoading(true)
     try {
       if (mode === "sign-up") {
-        // accountType is read by the user.create hook in lib/auth.ts to set the role.
-        const res = await authClient.signUp.email({ email, password, name, accountType: isDoctor ? "doctor" : "patient" })
+        // accountType is read by the user.create hook in lib/auth.ts to set the role
+        // (it isn't a user field, so it's not in Better Auth's sign-up type).
+        const body = { email, password, name, accountType: isDoctor ? "doctor" : "patient" }
+        const res = await authClient.signUp.email(body)
         if (res.error) throw new Error(res.error.message ?? "Sign-up failed")
         
         // Trigger backend OTP generation & email dispatch asynchronously (non-blocking)

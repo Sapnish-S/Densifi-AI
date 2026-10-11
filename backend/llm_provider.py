@@ -67,8 +67,15 @@ class LLMProvider(ABC):
 
     @abstractmethod
     def extract_lab(
-        self, system_prompt: str, pdf_bytes: bytes, instruction: str, temperature: float, max_tokens: Optional[int]
-    ) -> str: ...
+        self,
+        system_prompt: str,
+        doc_bytes: bytes,
+        instruction: str,
+        temperature: float,
+        max_tokens: Optional[int],
+        doc_format: str = "pdf",
+    ) -> str:
+        """doc_format: "pdf" or an image format ("png" | "jpeg" | "gif" | "webp")."""
 
     @abstractmethod
     def chat(self, system_prompt: str, messages: list[dict], max_tokens: int, temperature: float) -> str:
@@ -161,25 +168,17 @@ class AnthropicProvider(LLMProvider):
             messages=[{"role": "user", "content": text}],
         )
 
-    def extract_lab(self, system_prompt, pdf_bytes, instruction, temperature, max_tokens) -> str:
+    def extract_lab(self, system_prompt, doc_bytes, instruction, temperature, max_tokens, doc_format="pdf") -> str:
+        data = base64.b64encode(doc_bytes).decode("ascii")
+        if doc_format == "pdf":
+            doc = {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": data}}
+        else:
+            doc = {"type": "image", "source": {"type": "base64", "media_type": f"image/{doc_format}", "data": data}}
         return self._create(
             model=self.vision_model_id,
             system=system_prompt,
             max_tokens=max_tokens or self.LAB_DEFAULT_MAX_TOKENS,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {
-                        "type": "document",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "application/pdf",
-                            "data": base64.b64encode(pdf_bytes).decode("ascii"),
-                        },
-                    },
-                    {"type": "text", "text": instruction},
-                ],
-            }],
+            messages=[{"role": "user", "content": [doc, {"type": "text", "text": instruction}]}],
         )
 
     def chat(self, system_prompt, messages, max_tokens, temperature) -> str:
@@ -248,16 +247,17 @@ class BedrockProvider(LLMProvider):
             inferenceConfig={"maxTokens": max_tokens, "temperature": temperature},
         )
 
-    def extract_lab(self, system_prompt, pdf_bytes, instruction, temperature, max_tokens) -> str:
+    def extract_lab(self, system_prompt, doc_bytes, instruction, temperature, max_tokens, doc_format="pdf") -> str:
         # No maxTokens → Bedrock applies the model's default max output.
         config: dict = {"maxTokens": max_tokens + THINKING_HEADROOM} if max_tokens else {}
+        if doc_format == "pdf":
+            doc = {"document": {"name": "report", "format": "pdf", "source": {"bytes": doc_bytes}}}
+        else:
+            doc = {"image": {"format": doc_format, "source": {"bytes": doc_bytes}}}
         return self._converse(
             modelId=self.vision_model_id,
             system=[{"text": system_prompt}],
-            messages=[{"role": "user", "content": [
-                {"document": {"name": "report", "format": "pdf", "source": {"bytes": pdf_bytes}}},
-                {"text": instruction},
-            ]}],
+            messages=[{"role": "user", "content": [doc, {"text": instruction}]}],
             inferenceConfig=config,
             **self._claude_fields(),
         )
@@ -287,8 +287,8 @@ class MockProvider(LLMProvider):
         return ('{"miniaturization_index": 0.31, "density_percentage": 62.5, '
                 '"clinical_summary": "Your scalp shows improved coverage with thicker follicles since baseline."}')
 
-    def extract_lab(self, system_prompt, pdf_bytes, instruction, temperature, max_tokens) -> str:
-        if not pdf_bytes.startswith(b"%PDF"):
+    def extract_lab(self, system_prompt, doc_bytes, instruction, temperature, max_tokens, doc_format="pdf") -> str:
+        if doc_format == "pdf" and not doc_bytes.startswith(b"%PDF"):
             raise ProviderError("ValidationException", "The document is not a valid PDF.")
         return '{"dht": 42.5, "free_t": 12.75, "ferritin": 88.0}'
 
