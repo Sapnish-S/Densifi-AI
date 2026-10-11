@@ -856,7 +856,7 @@ export default function LandingPage() {
                 </motion.h2>
 
                 <motion.p variants={fadeUp} className="text-xl text-zinc-400 font-serif italic mb-24">
-                  Powered by Amazon Bedrock (Claude 4.5 Sonnet + Nova Lite).
+                  Powered by Amazon Bedrock (Claude Sonnet 5.5 + Nova Lite).
                 </motion.p>
 
                 <motion.div variants={stagger(0.18)} className="grid sm:grid-cols-2 gap-x-5 gap-y-16 mt-20">

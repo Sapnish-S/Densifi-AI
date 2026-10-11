@@ -16,6 +16,15 @@ export const auth = betterAuth({
   database: pool,
   baseURL,
   trustedOrigins,
+  user: {
+    additionalFields: {
+      role: {
+        type: "string",
+        defaultValue: "patient",
+        input: false,
+      },
+    },
+  },
   emailAndPassword: { 
     enabled: true,
     password: {

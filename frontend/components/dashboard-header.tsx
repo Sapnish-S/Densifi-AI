@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Bell, Camera, Crown, Moon, Sun, User } from "lucide-react"
+import Link from "next/link"
+import { Bell, Camera, Crown, Moon, Stethoscope, Sun, User } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { RetentionDialog } from "@/components/retention-dialog"
 import { useTheme } from "@/components/theme-provider"
@@ -71,6 +72,18 @@ export function DashboardHeader({ user, tier, onNavigate, onCamera, lastSeenAt }
 
           {/* Right cluster */}
           <div className="flex items-center gap-2">
+            {/* Clinician Portal Button */}
+            <Link
+              href="/doctor"
+              className={cn(
+                "hidden sm:flex h-8 items-center gap-1.5 rounded-sm border border-primary/30 bg-primary/10 px-2.5 text-[11px] font-semibold tracking-wide text-primary transition-all duration-200 hover:bg-primary/20",
+              )}
+              title="Open Clinician & Doctor Portal"
+            >
+              <Stethoscope className="h-3.5 w-3.5" />
+              <span>Doctor Portal</span>
+            </Link>
+
             {tier === "free" && (
               <Button
                 size="sm"
