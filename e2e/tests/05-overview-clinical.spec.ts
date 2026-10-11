@@ -9,6 +9,7 @@ import {
   seedMedication,
   seedPhoto,
 } from "./helpers-overview"
+import { makePng } from "./helpers-vault"
 
 // Overview and Clinical views. Copy matches frontend/components/{overview-panel,progression-vault,
 // regimen-editor-dialog,pro-gate,regimen-panel,biomarker-grid,correlation-chart}.tsx.
@@ -420,7 +421,7 @@ test.describe("Clinical · BiomarkerGrid (premium)", () => {
     await expect(grid(page).getByRole("button", { name: "Upload" })).toBeVisible()
   })
 
-  test("latest report tiles, Edit Data override is local only (U18), delete removes row", async ({ page }) => {
+  test("latest report tiles, Edit Data saves to the latest report, delete removes row", async ({ page }) => {
     const user = await createUser(page, { tier: "premium" })
     await seedLabReport(user.id, "january-panel.pdf", "2026-01-01", { dht: 0.5, freeT: 10, ferritin: 50 })
     const latestId = await seedLabReport(user.id, "march-panel.pdf", "2026-03-01", { dht: 0.42, freeT: null, ferritin: 0 })
@@ -446,7 +447,7 @@ test.describe("Clinical · BiomarkerGrid (premium)", () => {
     const titles = grid(page).locator("p.truncate")
     await expect(titles).toHaveText(["march-panel.pdf", "january-panel.pdf"])
 
-    // Edit Data → override locally
+    // Edit Data → saved onto the latest report
     await grid(page).getByRole("button", { name: "Edit Data" }).click()
     const dialog = page.getByRole("dialog")
     await expect(dialog.getByRole("heading", { name: "Edit Biomarker Data" })).toBeVisible()
@@ -457,18 +458,19 @@ test.describe("Clinical · BiomarkerGrid (premium)", () => {
     ).toBeVisible()
     const inputs = dialog.locator('input[type="number"]')
     await expect(inputs.nth(0)).toHaveValue("0.42")
+    await expect(inputs.nth(1)).toHaveValue("") // "--" → empty field
     await inputs.nth(0).fill("1.23")
-    const t0 = Date.now()
+    await inputs.nth(1).fill("15")
     await dialog.getByRole("button", { name: "Save Overrides" }).click()
     await expect(dialog).toBeHidden()
-    expect(Date.now() - t0).toBeGreaterThanOrEqual(500) // ~600ms simulated delay
     await expect(tiles(page).nth(0)).toContainText("1.23")
-    const [dbRow] = await sql(`SELECT dht FROM lab_report WHERE id = $1`, [latestId])
-    expect(Number(dbRow.dht)).toBe(0.42)
+    await expect(tiles(page).nth(1)).toContainText("15.00")
+    const [dbRow] = await sql(`SELECT dht, "freeT", ferritin FROM lab_report WHERE id = $1`, [latestId])
+    expect([Number(dbRow.dht), Number(dbRow.freeT), Number(dbRow.ferritin)]).toEqual([1.23, 15, 0])
 
-    // Reload → stored value (override never persisted)
+    // Reload → the saved values stay
     await gotoClinical(page)
-    await expect(tiles(page).nth(0)).toContainText("0.42")
+    await expect(tiles(page).nth(0)).toContainText("1.23")
 
     // Delete the latest report → tiles fall back to the older one
     const latestRow = grid(page).locator("div.grid").filter({ hasText: "march-panel.pdf" })
@@ -480,6 +482,58 @@ test.describe("Clinical · BiomarkerGrid (premium)", () => {
     await expect
       .poll(async () => (await sql(`SELECT id FROM lab_report WHERE "userId" = $1`, [user.id])).length)
       .toBe(1)
+  })
+})
+
+test.describe("Clinical · Lab report upload (premium)", () => {
+  const grid = (p: Page) => p.locator('[data-tutorial-id="tutorial-biomarker"]')
+  const tiles = (p: Page) => grid(p).locator(".grid.grid-cols-3 > div")
+  const pdf = (extra = 0) =>
+    Buffer.concat([Buffer.from("%PDF-1.4\n% lab panel\ntrailer<<>>\n%%EOF\n"), Buffer.alloc(extra, 0x20)])
+
+  async function upload(page: Page, file: { name: string; mimeType: string; buffer: Buffer }) {
+    const chooser = page.waitForEvent("filechooser")
+    await grid(page).getByRole("button", { name: "Upload" }).click()
+    await (await chooser).setFiles(file)
+  }
+
+  const labRows = (userId: string) =>
+    sql(`SELECT label, dht, "freeT", ferritin FROM lab_report WHERE "userId" = $1`, [userId])
+
+  // The mock provider returns DHT 42.5 / Free T 12.75 / Ferritin 88 for any readable document.
+  for (const [name, mimeType, buffer] of [
+    ["panel.pdf", "application/pdf", pdf()],
+    ["panel-2mb.pdf", "application/pdf", pdf(2_000_000)], // over the old 1 MB server-action limit
+    ["panel-photo.png", "image/png", makePng(2400, 1200)], // photo of a report → shrunk + sent as an image
+  ] as const) {
+    test(`${name} is analysed and the values shown`, async ({ page }) => {
+      const user = await createUser(page, { tier: "premium" })
+      await gotoClinical(page)
+      await upload(page, { name, mimeType, buffer })
+      await expect(tiles(page).nth(0)).toContainText("42.50")
+      await expect(tiles(page).nth(1)).toContainText("12.75")
+      await expect(tiles(page).nth(2)).toContainText("88.00")
+      await expect(grid(page).getByRole("status")).toHaveCount(0)
+      expect(await labRows(user.id)).toEqual([{ label: name, dht: "42.5", freeT: "12.75", ferritin: "88" }])
+    })
+  }
+
+  test("unreadable file is saved and the user is told to enter values", async ({ page }) => {
+    const user = await createUser(page, { tier: "premium" })
+    await gotoClinical(page)
+    await upload(page, { name: "scan.pdf", mimeType: "application/pdf", buffer: Buffer.from("not really a pdf") })
+    await expect(grid(page).getByRole("status")).toContainText("you can enter the values with Edit Data")
+    await expect(tiles(page).nth(0)).toContainText("--")
+    expect(await labRows(user.id)).toEqual([{ label: "scan.pdf", dht: null, freeT: null, ferritin: null }])
+  })
+
+  test("PDF over 3 MB is refused before upload", async ({ page }) => {
+    const user = await createUser(page, { tier: "premium" })
+    await gotoClinical(page)
+    await upload(page, { name: "huge.pdf", mimeType: "application/pdf", buffer: pdf(3_200_000) })
+    await expect(grid(page).getByRole("alert")).toContainText("larger than 3 MB")
+    await expect(grid(page).getByText("No lab documents uploaded.")).toBeVisible()
+    expect(await labRows(user.id)).toEqual([])
   })
 })
 

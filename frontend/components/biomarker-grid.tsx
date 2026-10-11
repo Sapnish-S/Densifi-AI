@@ -11,13 +11,68 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog"
-import { getLabReports, uploadLabReport, deleteLabReport } from "@/app/actions/lab-reports"
+import { getLabReports, uploadLabReport, deleteLabReport, updateLabValues } from "@/app/actions/lab-reports"
 import { cn } from "@/lib/utils"
 
 interface BiomarkerData {
   dht: string
   freeT: string
   ferritin: string
+}
+
+// Uploads go through a server action (4 MB body limit, base64 adds ~33%).
+const MAX_PDF_BYTES = 3 * 1024 * 1024
+// Photos of a report are re-encoded to JPEG at this size: small enough to upload,
+// and still sharp enough for the model to read the numbers.
+const MAX_IMAGE_EDGE = 2000
+
+function readAsDataUrl(file: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+}
+
+async function shrinkImage(file: File): Promise<string> {
+  const url = URL.createObjectURL(file)
+  try {
+    const img = new Image()
+    img.src = url
+    await img.decode()
+    const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(img.naturalWidth, img.naturalHeight))
+    const canvas = document.createElement("canvas")
+    canvas.width = Math.round(img.naturalWidth * scale)
+    canvas.height = Math.round(img.naturalHeight * scale)
+    const ctx = canvas.getContext("2d")!
+    ctx.fillStyle = "#fff" // transparent screenshots → white, not black
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+    return canvas.toDataURL("image/jpeg", 0.85)
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
+async function prepareLabFile(file: File): Promise<string> {
+  if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+    if (file.size > MAX_PDF_BYTES) throw new Error("This PDF is larger than 3 MB. Please upload a smaller file or a photo of the report.")
+    return readAsDataUrl(file)
+  }
+  if (file.type.startsWith("image/")) {
+    try {
+      return await shrinkImage(file)
+    } catch {
+      throw new Error("This image format isn't supported here. Please upload a PDF, JPEG or PNG.")
+    }
+  }
+  throw new Error("Please upload a PDF or an image of your lab report.")
+}
+
+function toNumberOrNull(v: string): number | null {
+  const n = Number.parseFloat(v)
+  return Number.isFinite(n) ? n : null
 }
 
 export function BiomarkerGrid() {
@@ -33,6 +88,7 @@ export function BiomarkerGrid() {
   
   const [formData, setFormData] = useState<BiomarkerData>(biomarkers)
   const [savingOverride, setSavingOverride] = useState(false)
+  const [notice, setNotice] = useState<{ tone: "error" | "info"; text: string } | null>(null)
 
   // Use real data from the database
   useEffect(() => {
@@ -67,32 +123,54 @@ export function BiomarkerGrid() {
     input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0]
       if (!file) return
+      setNotice(null)
       setLoading(true)
-      const reader = new FileReader()
-      reader.onload = async (ev) => {
-        const dataUrl = ev.target?.result as string
-        await uploadLabReport({ title: file.name, dataUrl })
-        const data = await getLabReports()
-        setReports(data)
+      try {
+        const dataUrl = await prepareLabFile(file)
+        const result = await uploadLabReport({ title: file.name, dataUrl })
+        if (!result.analyzed) {
+          setNotice({
+            tone: "info",
+            text: result.message
+              ? `${result.message} The document was saved; you can enter the values with Edit Data.`
+              : "We couldn't read DHT, Free T or Ferritin from this report. The document was saved; you can enter the values with Edit Data.",
+          })
+        }
+        setReports(await getLabReports())
+      } catch (err) {
+        setNotice({ tone: "error", text: err instanceof Error && err.message ? err.message : "Upload failed. Please try again." })
+      } finally {
         setLoading(false)
       }
-      reader.readAsDataURL(file)
     }
     input.click()
   }
 
   function handleOpenEdit() {
-    setFormData(biomarkers)
+    const clean = (v: string) => (v === "--" ? "" : v)
+    setFormData({ dht: clean(biomarkers.dht), freeT: clean(biomarkers.freeT), ferritin: clean(biomarkers.ferritin) })
     setEditOpen(true)
   }
 
+  // Saves the corrected values onto the latest report, so they survive a reload.
   async function handleSaveOverride() {
+    const latest = reports[0]
+    if (!latest) return
     setSavingOverride(true)
-    // Simulate API delay for override save
-    await new Promise(r => setTimeout(r, 600))
-    setBiomarkers(formData)
-    setSavingOverride(false)
-    setEditOpen(false)
+    try {
+      await updateLabValues(latest.id, {
+        dht: toNumberOrNull(formData.dht),
+        freeT: toNumberOrNull(formData.freeT),
+        ferritin: toNumberOrNull(formData.ferritin),
+      })
+      setReports(await getLabReports())
+      setNotice(null)
+      setEditOpen(false)
+    } catch {
+      setNotice({ tone: "error", text: "Couldn't save your changes. Please try again." })
+    } finally {
+      setSavingOverride(false)
+    }
   }
 
   const hasReports = reports.length > 0
@@ -117,6 +195,17 @@ export function BiomarkerGrid() {
       </CardHeader>
       
       <CardContent className="px-0 py-0">
+        {notice && (
+          <p
+            role={notice.tone === "error" ? "alert" : "status"}
+            className={cn(
+              "px-4 py-2.5 text-xs border-b border-border/40",
+              notice.tone === "error" ? "text-destructive bg-destructive/10" : "text-muted-foreground bg-secondary/20",
+            )}
+          >
+            {notice.text}
+          </p>
+        )}
         {/* Biomarker Result Cards */}
         {loading ? (
           <div className="flex items-center justify-center py-10 border-b border-border/40">

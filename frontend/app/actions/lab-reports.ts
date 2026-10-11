@@ -31,13 +31,21 @@ export async function getLabReports() {
   return res.rows as { id: string; title: string; uploadedAt: string; dht: number; freeT: number; ferritin: number }[]
 }
 
-export async function uploadLabReport(data: { title: string; dataUrl: string }) {
+export type LabValues = { dht: number | null; freeT: number | null; ferritin: number | null }
+
+// The document is always saved; `analyzed` says whether the AI could read any values,
+// so the UI can ask the user to enter them by hand instead of silently showing "--".
+export async function uploadLabReport(data: {
+  title: string
+  dataUrl: string
+}): Promise<{ id: string; analyzed: boolean; message?: string }> {
   const userId = await getUserId()
   await requirePremium(userId)
   const id = randomUUID()
 
   // Send to AI extraction pipeline
   let dht = null, freeT = null, ferritin = null;
+  let message: string | undefined
   try {
     const base = getServerApiUrl()
     const res = await fetch(`${base}/analyze-lab`, {
@@ -47,17 +55,14 @@ export async function uploadLabReport(data: { title: string; dataUrl: string }) 
       cache: "no-store",
     })
     
-    if (res.ok) {
-      const json = await res.json()
-      if (!json.error) {
-        dht = json.dht
-        freeT = json.free_t
-        ferritin = json.ferritin
-      } else {
-        console.error("AI Analysis returned error:", json.error_message)
-      }
+    const json = await res.json().catch(() => null)
+    if (res.ok && json && !json.error) {
+      dht = json.dht
+      freeT = json.free_t
+      ferritin = json.ferritin
     } else {
-      console.error("AI Analysis HTTP error:", res.status, await res.text())
+      console.error("AI Analysis failed:", res.status, json)
+      if (json?.error_code === "UNSUPPORTED_FILE") message = json.error_message
     }
   } catch (err) {
     console.error("AI Analysis fetch failed:", err)
@@ -68,7 +73,17 @@ export async function uploadLabReport(data: { title: string; dataUrl: string }) 
     [id, userId, data.title, data.dataUrl, dht, freeT, ferritin],
   )
   revalidatePath("/")
-  return id
+  return { id, analyzed: dht !== null || freeT !== null || ferritin !== null, message }
+}
+
+export async function updateLabValues(id: string, values: LabValues) {
+  const userId = await getUserId()
+  await requirePremium(userId)
+  await query(
+    `UPDATE lab_report SET dht = $3, "freeT" = $4, ferritin = $5 WHERE id = $1 AND "userId" = $2`,
+    [id, userId, values.dht, values.freeT, values.ferritin],
+  )
+  revalidatePath("/")
 }
 
 export async function deleteLabReport(id: string) {

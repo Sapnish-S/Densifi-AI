@@ -211,10 +211,33 @@ def analyze_vault_image(baseline_s3_key: str, current_s3_key: str) -> dict:
         return asdict(_map_exception(exc))
 
 
-def analyze_lab_report(pdf_bytes: bytes) -> dict:
+def lab_document_format(data: bytes) -> Optional[str]:
+    """Lab uploads may be a PDF or a photo/screenshot of the report; sniff the bytes."""
+    if data.startswith(b"%PDF"):
+        return "pdf"
+    if data.startswith(b"\x89PNG"):
+        return "png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "jpeg"
+    if data.startswith((b"GIF87a", b"GIF89a")):
+        return "gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    return None
+
+
+UNSUPPORTED_LAB_FILE = AnalysisError(True, "UNSUPPORTED_FILE", "Upload a PDF or an image (PNG, JPEG, WebP or GIF).", False)
+
+
+def analyze_lab_report(doc_bytes: bytes) -> dict:
+    doc_format = lab_document_format(doc_bytes)
+    if doc_format is None:
+        return asdict(UNSUPPORTED_LAB_FILE)
     try:
         provider = get_provider()
-        raw_text = provider.extract_lab(LAB_PROMPT, pdf_bytes, LAB_INSTRUCTION, temperature=0.0, max_tokens=None)
+        raw_text = provider.extract_lab(
+            LAB_PROMPT, doc_bytes, LAB_INSTRUCTION, temperature=0.0, max_tokens=None, doc_format=doc_format
+        )
         if LOG_LAB_OCR_TEXT:
             logger.info("Lab OCR raw text: %s", raw_text)
         data = extract_json_object(raw_text)

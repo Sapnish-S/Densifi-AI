@@ -182,7 +182,26 @@ def test_analyze_lab_success_and_params(client, provider):
     assert res.json() == {"dht": 42.5, "free_t": None, "ferritin": 15.0}
     lab = provider.calls[0]
     assert lab[1] == (analyzer.LAB_PROMPT, b"%PDF-1.4 test", analyzer.LAB_INSTRUCTION)
-    assert lab[2] == {"temperature": 0.0, "max_tokens": None}
+    assert lab[2] == {"temperature": 0.0, "max_tokens": None, "doc_format": "pdf"}
+
+
+@pytest.mark.parametrize(
+    "data, fmt",
+    [(b"\x89PNG\r\n", "png"), (b"\xff\xd8\xff\xe0", "jpeg"), (b"GIF89a", "gif"), (b"RIFF\0\0\0\0WEBPVP8 ", "webp")],
+)
+def test_analyze_lab_accepts_report_images(client, provider, data, fmt):
+    data_url = f"data:image/{fmt};base64," + base64.b64encode(data).decode()
+    res = client.post("/analyze-lab", json={"user_id": "u", "data_url": data_url})
+    assert res.status_code == 200
+    assert provider.calls[0][2]["doc_format"] == fmt
+
+
+def test_analyze_lab_rejects_unsupported_files(client, provider):
+    data_url = "data:text/plain;base64," + base64.b64encode(b"DHT 42").decode()
+    res = client.post("/analyze-lab", json={"user_id": "u", "data_url": data_url})
+    assert res.status_code == 422
+    assert res.json()["error_code"] == "UNSUPPORTED_FILE"
+    assert provider.calls == []
 
 
 def test_analyze_lab_raw_base64_and_bad_base64(client, provider):
@@ -308,6 +327,10 @@ def test_anthropic_formatter_chat_and_lab_requests(anthropic_provider):
     doc = lab["messages"][0]["content"][0]
     assert doc == {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": base64.b64encode(b"%PDF").decode()}}
 
+    p.extract_lab("LAB", b"\x89PNG", "INSTR", 0.0, None, doc_format="png")
+    img = fake.kwargs[-1]["messages"][0]["content"][0]
+    assert img == {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": base64.b64encode(b"\x89PNG").decode()}}
+
 
 def test_provider_selection(monkeypatch):
     llm_provider.set_provider(None)
@@ -361,6 +384,9 @@ def test_bedrock_request_shape(bedrock_provider):
     assert lab["messages"][0]["content"][0] == {"document": {"name": "report", "format": "pdf", "source": {"bytes": b"%PDF"}}}
     assert lab["inferenceConfig"] == {}  # Bedrock default max tokens
     assert chat["modelId"] == "us.amazon.nova-lite-v1:0" and chat["inferenceConfig"] == {"maxTokens": 256, "temperature": 0.5}
+
+    p.extract_lab("LAB", b"\xff\xd8\xff", "INSTR", 0.0, None, doc_format="jpeg")
+    assert fake.kwargs[-1]["messages"][0]["content"][0] == {"image": {"format": "jpeg", "source": {"bytes": b"\xff\xd8\xff"}}}
 
 
 def test_bedrock_sonnet_4_5_omits_effort(monkeypatch):

@@ -19,6 +19,12 @@ const nextConfig = {
   },
   // Better Auth and pg must not be bundled by Next.js
   serverExternalPackages: ["better-auth", "pg"],
+  experimental: {
+    // Lab reports are sent to a server action as a base64 data URL; the 1 MB default rejected
+    // most PDFs. Vercel caps request bodies at 4.5 MB, so stay just under it (the client
+    // limits PDFs to 3 MB and shrinks photos before upload).
+    serverActions: { bodySizeLimit: "4mb" },
+  },
   async rewrites() {
     return siteAssetsBase ? [{ source: "/site-proxy/:path*", destination: `${siteAssetsBase}/:path*` }] : []
   },

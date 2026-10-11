@@ -198,10 +198,10 @@ def analyze(req: AnalyzeRequest):
 def analyze_lab(req: LabAnalyzeRequest):
     try:
         payload = req.data_url.split(",", 1)[1] if "," in req.data_url else req.data_url
-        pdf_bytes = base64.b64decode(payload)
+        doc_bytes = base64.b64decode(payload)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
-    result = analyzer.analyze_lab_report(pdf_bytes)
+    result = analyzer.analyze_lab_report(doc_bytes)
     if result.get("error"):
         return _ai_error_response(result)
     return result
