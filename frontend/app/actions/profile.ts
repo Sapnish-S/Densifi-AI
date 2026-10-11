@@ -27,7 +27,7 @@ export async function getProfile() {
     // Auto-create profile on first access
     const id = randomUUID()
     await query(
-      `INSERT INTO profile (id, "userId", tier, "displayName", gender, "createdAt", "updatedAt") VALUES ($1, $2, $3, $4, 'male', now(), now())`,
+      `INSERT INTO profile (id, "userId", tier, "displayName", "createdAt", "updatedAt") VALUES ($1, $2, $3, $4, now(), now())`,
       [id, userId, "free", null],
     )
     return { id, userId, tier: "free" as const, displayName: null, gender: "male" as const, role: "patient" as "patient" | "doctor" }
