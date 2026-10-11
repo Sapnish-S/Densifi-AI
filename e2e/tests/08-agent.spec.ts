@@ -101,10 +101,9 @@ test.describe("AI Agent — analysis", () => {
     await page.getByRole("button", { name: /Run new analysis/ }).click()
     await page.getByRole("button", { name: "Analyze Latest Progress" }).click()
     await expect(page.getByRole("dialog").getByText("Analysis Complete")).toBeVisible({ timeout: 30_000 })
-    await page.getByRole("button", { name: "Forward to Clinician" }).click()
-    // The auto-opened Forward modal hides the rest of the page from role queries.
+    await page.getByRole("button", { name: "Share with a Doctor" }).click()
     await expect(page.locator("main h1")).toHaveText("Clinical Doctor Network")
-    await expect(page.getByText("Forward AI Report")).toBeVisible()
+    await expect(page.getByRole("heading", { name: "Find a doctor" })).toBeVisible()
   })
 
   test("forward as free user lands on the ProGate", async ({ page }) => {
@@ -114,7 +113,7 @@ test.describe("AI Agent — analysis", () => {
     await openAgent(page)
     await page.getByRole("button", { name: "Analyze Latest Progress" }).click()
     await expect(page.getByRole("dialog").getByText("Analysis Complete")).toBeVisible({ timeout: 30_000 })
-    await page.getByRole("button", { name: "Forward to Clinician" }).click()
+    await page.getByRole("button", { name: "Share with a Doctor" }).click()
     await expect(page.getByText("Unlock Doctor Network")).toBeVisible()
   })
 })

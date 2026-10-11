@@ -87,14 +87,14 @@ export function AgentView({
   gender = "male",
   onGenderChange,
   onUpgrade,
-  onForwardReport
+  onShareWithDoctor
 }: { 
   user: { id: string; name: string; email: string }; 
   tier: "free" | "premium"; 
   gender?: GenderPreference;
   onGenderChange?: (gender: GenderPreference) => void;
   onUpgrade: () => void;
-  onForwardReport?: (report: AnalysisResult) => void;
+  onShareWithDoctor?: () => void;
 }) {
   const [messages, setMessages] = useState<Message[]>([])
   const [dailyCount, setDailyCount] = useState(0)
@@ -451,13 +451,11 @@ export function AgentView({
               className="rounded-sm bg-foreground text-background hover:bg-foreground/90 text-xs tracking-wide uppercase gap-2"
               onClick={() => {
                 setShowReportModal(false)
-                if (analysisResult && onForwardReport) {
-                  onForwardReport(analysisResult)
-                }
+                onShareWithDoctor?.()
               }}
             >
               <Stethoscope className="h-3.5 w-3.5" />
-              Forward to Clinician
+              Share with a Doctor
             </Button>
           </DialogFooter>
         </DialogContent>

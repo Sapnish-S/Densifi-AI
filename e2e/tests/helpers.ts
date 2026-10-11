@@ -42,7 +42,14 @@ export interface TestUser {
  */
 export async function createUser(
   page: Page,
-  opts: { verified?: boolean; tier?: "free" | "premium"; name?: string; lastSeenDaysAgo?: number; onboarded?: boolean } = {},
+  opts: {
+    verified?: boolean
+    tier?: "free" | "premium"
+    name?: string
+    lastSeenDaysAgo?: number
+    onboarded?: boolean
+    doctor?: boolean // signs up with the "I'm a doctor" choice (accountType: "doctor")
+  } = {},
 ): Promise<TestUser> {
   const user = {
     name: opts.name ?? "Marcus Reed",
@@ -50,7 +57,7 @@ export async function createUser(
     password: "Densify-Test-Pass1", // gitleaks:allow — E2E fixture, not a credential
   }
   const res = await page.request.post("/api/auth/sign-up/email", {
-    data: user,
+    data: { ...user, accountType: opts.doctor ? "doctor" : "patient" },
     headers: { Origin: "http://localhost:3000" },
   })
   expect(res.ok(), await res.text()).toBeTruthy()

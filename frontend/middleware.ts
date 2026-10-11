@@ -29,11 +29,13 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(verifyUrl);
     }
 
-    // ROLE-BASED ACCESS CONTROL (RBAC) ROUTE ENFORCEMENT:
-    if (sessionData?.user?.role === "doctor" && request.nextUrl.pathname === "/") {
+    // Role routing: doctors live under /doctor, everyone else is kept out of it.
+    // /doctor/page.tsx re-checks the role server-side.
+    const isDoctor = sessionData?.user?.role === "doctor";
+    if (isDoctor && request.nextUrl.pathname === "/") {
       return NextResponse.redirect(new URL("/doctor", request.url));
     }
-    if (sessionData?.user?.role === "patient" && request.nextUrl.pathname.startsWith("/doctor")) {
+    if (!isDoctor && request.nextUrl.pathname.startsWith("/doctor")) {
       return NextResponse.redirect(new URL("/", request.url));
     }
 

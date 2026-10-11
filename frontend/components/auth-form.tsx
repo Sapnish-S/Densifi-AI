@@ -4,7 +4,7 @@ import { getPublicApiUrl } from "@/lib/api-url"
 import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { motion } from "framer-motion"
-import { Eye, EyeOff, Loader2, Stethoscope, User } from "lucide-react"
+import { Eye, EyeOff, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -285,15 +285,13 @@ function FollicularPanel() {
 
 export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
   const router = useRouter()
-  const [name, setName]         = useState("")
-  const [email, setEmail]       = useState("")
+  const [name, setName]       = useState("")
+  const [email, setEmail]     = useState("")
   const [password, setPassword] = useState("")
-  const [role, setRole]         = useState<"patient" | "doctor">("patient")
-  const [specialty, setSpecialty] = useState("Trichology & Hair Restoration Specialist")
-  const [licenseNumber, setLicenseNumber] = useState("")
-  const [showPw, setShowPw]     = useState(false)
-  const [error, setError]       = useState<string | null>(null)
-  const [loading, setLoading]   = useState(false)
+  const [showPw, setShowPw]   = useState(false)
+  const [isDoctor, setIsDoctor] = useState(false)
+  const [error, setError]     = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
 
   const getApiUrl = () => {
     const isLocal = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
@@ -312,47 +310,22 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
     setLoading(true)
     try {
       if (mode === "sign-up") {
-        const res = await authClient.signUp.email({ email, password, name })
+        // accountType is read by the user.create hook in lib/auth.ts to set the role.
+        const res = await authClient.signUp.email({ email, password, name, accountType: isDoctor ? "doctor" : "patient" })
         if (res.error) throw new Error(res.error.message ?? "Sign-up failed")
-
-        if (role === "doctor") {
-          // Doctor sign-up: register role, auto-verify, sign in directly
-          await fetch("/api/auth/register-role", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              email,
-              role: "doctor",
-              specialty: specialty,
-              licenseNumber: licenseNumber || "MED-TRICH-9841",
-            })
-          }).catch((e) => {
-            console.error("Failed to register role", e);
-          });
-
-          const signInRes = await authClient.signIn.email({ email, password });
-          if (!signInRes.error) {
-            router.push("/doctor");
-            router.refresh();
-            return;
-          }
-
-          router.push("/doctor");
-          router.refresh();
-          return;
-        } else {
-          // Patient sign-up: trigger OTP verification email and redirect to /verify
-          const apiUrl = getApiUrl();
-          fetch(`${apiUrl}/signup`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email })
-          }).catch((e) => {
-            console.error("Failed to trigger verification email", e);
-          });
-          router.push("/verify?email=" + encodeURIComponent(email))
-          return;
-        }
+        
+        // Trigger backend OTP generation & email dispatch asynchronously (non-blocking)
+        const apiUrl = getApiUrl();
+        fetch(`${apiUrl}/signup`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email })
+        }).catch((e) => {
+          console.error("Failed to trigger verification email", e);
+        });
+        
+        router.push("/verify?email=" + encodeURIComponent(email))
+        return
       } else {
         const apiUrl = getApiUrl();
         
@@ -385,18 +358,13 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
         const res = await authClient.signIn.email({ email, password });
         if (res.error) throw new Error(res.error.message ?? "Sign-in failed");
 
-        // Determine destination dashboard based on user role
-        try {
-          const roleRes = await fetch(`/api/auth/get-user-role?email=${encodeURIComponent(email)}`);
-          const roleData = await roleRes.json();
-          if (roleData.role === "doctor") {
-            router.push("/doctor");
-          } else {
-            router.push("/");
-          }
-        } catch {
-          router.push("/");
+        const role = (res.data?.user as { role?: string } | undefined)?.role
+        if (isDoctor && role !== "doctor") {
+          await authClient.signOut();
+          throw new Error("This account isn't registered as a doctor. Untick \"I'm a doctor\" to sign in.");
         }
+
+        router.push(role === "doctor" ? "/doctor" : "/");
         router.refresh();
       }
     } catch (err: unknown) {
@@ -455,100 +423,20 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
           <div className="rounded-[4px] border border-white/[0.09] bg-[oklch(0.08_0.004_260/0.95)] backdrop-blur-xl p-7 shadow-[0_24px_64px_oklch(0_0_0/0.5)]">
             <form onSubmit={handleSubmit} className="space-y-5">
               {mode === "sign-up" && (
-                <>
-                  {/* Role Selector */}
-                  <div className="space-y-1.5">
-                    <Label className="text-[11px] font-medium tracking-[0.08em] uppercase text-white/50">
-                      Account Role
-                    </Label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setRole("patient")}
-                        className={cn(
-                          "flex flex-col items-start p-2.5 rounded-[3px] border text-left transition-all",
-                          role === "patient"
-                            ? "border-white bg-white/10 text-white ring-1 ring-white/20"
-                            : "border-white/[0.12] bg-[oklch(0.06_0.003_260)] text-white/50 hover:border-white/30 hover:text-white"
-                        )}
-                      >
-                        <span className="text-xs font-semibold flex items-center gap-1.5">
-                          <User className="h-3.5 w-3.5 text-white" /> Patient
-                        </span>
-                        <span className="text-[10px] text-white/40 mt-0.5 leading-tight">Personal tracking & vault</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setRole("doctor")}
-                        className={cn(
-                          "flex flex-col items-start p-2.5 rounded-[3px] border text-left transition-all",
-                          role === "doctor"
-                            ? "border-violet-400 bg-violet-500/15 text-white ring-1 ring-violet-400/40"
-                            : "border-white/[0.12] bg-[oklch(0.06_0.003_260)] text-white/50 hover:border-white/30 hover:text-white"
-                        )}
-                      >
-                        <span className="text-xs font-semibold flex items-center gap-1.5 text-violet-300">
-                          <Stethoscope className="h-3.5 w-3.5 text-violet-400" /> Doctor
-                        </span>
-                        <span className="text-[10px] text-white/40 mt-0.5 leading-tight">Clinical caseload portal</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Doctor Details (if doctor selected) */}
-                  {role === "doctor" && (
-                    <motion.div
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: "auto" }}
-                      className="space-y-2.5 p-3 rounded-[3px] border border-violet-500/20 bg-violet-500/5 text-xs"
-                    >
-                      <div className="space-y-1">
-                        <Label htmlFor="specialty" className="text-[10px] font-medium tracking-[0.08em] uppercase text-violet-300">
-                          Specialty
-                        </Label>
-                        <select
-                          id="specialty"
-                          value={specialty}
-                          onChange={(e) => setSpecialty(e.target.value)}
-                          className="w-full h-8 rounded-[3px] border border-white/[0.15] bg-[oklch(0.06_0.003_260)] text-white text-xs px-2 focus:ring-1 focus:ring-violet-400 outline-none"
-                        >
-                          <option value="Trichology & Hair Restoration Specialist">Trichology & Hair Restoration Specialist</option>
-                          <option value="Dermatologist & Scalp Specialist">Dermatologist & Scalp Specialist</option>
-                          <option value="Hair Transplant Surgeon">Hair Transplant Surgeon</option>
-                          <option value="Clinical Trichologist">Clinical Trichologist</option>
-                        </select>
-                      </div>
-
-                      <div className="space-y-1">
-                        <Label htmlFor="license" className="text-[10px] font-medium tracking-[0.08em] uppercase text-violet-300">
-                          Medical License / NPI #
-                        </Label>
-                        <Input
-                          id="license"
-                          placeholder="e.g. MED-TRICH-9841"
-                          value={licenseNumber}
-                          onChange={(e) => setLicenseNumber(e.target.value)}
-                          className="h-8 rounded-[3px] border-white/[0.12] bg-[oklch(0.06_0.003_260)] text-white text-xs placeholder:text-white/20"
-                        />
-                      </div>
-                    </motion.div>
-                  )}
-
-                  <div className="space-y-1.5">
-                    <Label htmlFor="name" className="text-[11px] font-medium tracking-[0.08em] uppercase text-white/50">
-                      Full name
-                    </Label>
-                    <Input
-                      id="name"
-                      placeholder={role === "doctor" ? "Dr. Alex Vance" : "Marcus Reed"}
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      required
-                      autoComplete="name"
-                      className="h-10 rounded-[3px] border-white/[0.12] bg-[oklch(0.06_0.003_260)] text-white placeholder:text-white/20 focus-visible:ring-white/20 focus-visible:border-white/30 transition-colors"
-                    />
-                  </div>
-                </>
+                <div className="space-y-1.5">
+                  <Label htmlFor="name" className="text-[11px] font-medium tracking-[0.08em] uppercase text-white/50">
+                    Full name
+                  </Label>
+                  <Input
+                    id="name"
+                    placeholder="Marcus Reed"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    required
+                    autoComplete="name"
+                    className="h-10 rounded-[3px] border-white/[0.12] bg-[oklch(0.06_0.003_260)] text-white placeholder:text-white/20 focus-visible:ring-white/20 focus-visible:border-white/30 transition-colors"
+                  />
+                </div>
               )}
 
               <div className="space-y-1.5">
@@ -599,6 +487,19 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
                   </button>
                 </div>
               </div>
+
+              <label htmlFor="is-doctor" className="flex items-center gap-2.5 cursor-pointer select-none">
+                <input
+                  id="is-doctor"
+                  type="checkbox"
+                  checked={isDoctor}
+                  onChange={(e) => setIsDoctor(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded-[2px] accent-white"
+                />
+                <span className="text-[12px] text-white/60">
+                  {mode === "sign-up" ? "I'm a doctor — create a doctor account" : "I'm a doctor — sign in to the doctor portal"}
+                </span>
+              </label>
 
               {error && (
                 <p className="text-[11px] text-red-400/90 rounded-[3px] border border-red-500/20 bg-red-500/10 px-3 py-2 leading-relaxed">
