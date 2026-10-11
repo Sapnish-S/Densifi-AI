@@ -13,10 +13,11 @@ export async function POST(request: Request) {
 
     const assignedRole = role === "doctor" ? "doctor" : "patient"
 
-    // 1. Update role on the user record and ensure verified status
+    // 1. Update role on the user record; auto-verify only for doctors (patients go through OTP flow)
+    const shouldVerify = assignedRole === "doctor"
     const res = await query(
-      `UPDATE "user" SET role = $1, "emailVerified" = true, "updatedAt" = now() WHERE email = $2 RETURNING id`,
-      [assignedRole, email]
+      `UPDATE "user" SET role = $1, "emailVerified" = CASE WHEN $3 THEN true ELSE "emailVerified" END, "updatedAt" = now() WHERE email = $2 RETURNING id`,
+      [assignedRole, email, shouldVerify]
     )
 
     if (res.rows.length === 0) {

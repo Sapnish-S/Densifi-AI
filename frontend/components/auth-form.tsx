@@ -315,35 +315,44 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
         const res = await authClient.signUp.email({ email, password, name })
         if (res.error) throw new Error(res.error.message ?? "Sign-up failed")
 
-        // Register assigned role & initialize doctor profile if doctor
-        await fetch("/api/auth/register-role", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            email,
-            role,
-            specialty: role === "doctor" ? specialty : undefined,
-            licenseNumber: role === "doctor" ? (licenseNumber || "MED-TRICH-9841") : undefined,
-          })
-        }).catch((e) => {
-          console.error("Failed to register role", e);
-        });
+        if (role === "doctor") {
+          // Doctor sign-up: register role, auto-verify, sign in directly
+          await fetch("/api/auth/register-role", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              email,
+              role: "doctor",
+              specialty: specialty,
+              licenseNumber: licenseNumber || "MED-TRICH-9841",
+            })
+          }).catch((e) => {
+            console.error("Failed to register role", e);
+          });
 
-        // Establish session immediately and redirect to role-specific dashboard
-        const signInRes = await authClient.signIn.email({ email, password });
-        if (!signInRes.error) {
-          if (role === "doctor") {
+          const signInRes = await authClient.signIn.email({ email, password });
+          if (!signInRes.error) {
             router.push("/doctor");
-          } else {
-            router.push("/");
+            router.refresh();
+            return;
           }
+
+          router.push("/doctor");
           router.refresh();
           return;
+        } else {
+          // Patient sign-up: trigger OTP verification email and redirect to /verify
+          const apiUrl = getApiUrl();
+          fetch(`${apiUrl}/signup`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email })
+          }).catch((e) => {
+            console.error("Failed to trigger verification email", e);
+          });
+          router.push("/verify?email=" + encodeURIComponent(email))
+          return;
         }
-
-        router.push(role === "doctor" ? "/doctor" : "/");
-        router.refresh();
-        return;
       } else {
         const apiUrl = getApiUrl();
         
@@ -357,12 +366,16 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
         if (preCheckRes.status === 403) {
           const data = await preCheckRes.json();
           if (data.requires_verification) {
-            // Auto-verify in development so user is not stuck on missing email OTP
-            await fetch("/api/auth/register-role", {
+            // Unverified user. Resend OTP and go to verify page (non-blocking)
+            fetch(`${apiUrl}/api/auth/resend-otp`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ email, role: "patient" })
-            }).catch(() => {});
+              body: JSON.stringify({ email })
+            }).catch((e) => {
+              console.error("Failed to trigger verification email", e);
+            });
+            router.push("/verify?email=" + encodeURIComponent(data.email));
+            return;
           }
         } else if (!preCheckRes.ok) {
           throw new Error("Invalid credentials");
