@@ -15,7 +15,7 @@ Densify runs on **Akamai Cloud**, with the web app on Vercel.
 | Database | **Akamai Managed PostgreSQL 16** | `db/schema/0001_init.sql` |
 | Vault photos | **Akamai Object Storage** (S3-compatible, public-read objects) | `frontend/lib/s3.ts` |
 | Network, DNS | **Akamai VPC, Cloud Firewall, DNS Manager** | `infra/terraform/` |
-| AI | **AWS Bedrock** (Claude Sonnet 4.5 vision/OCR, Nova Lite formatter/chat) via `backend/llm_provider.py`; Anthropic API adapter also available | `backend/analyzer.py` |
+| AI | **AWS Bedrock** (Claude Sonnet 5.5 vision/OCR, Nova Lite formatter/chat) via `backend/llm_provider.py`; Anthropic API adapter also available | `backend/analyzer.py` |
 | Email | Brevo | `backend/email_service.py` |
 
 A Kubernetes path is kept for scale-up: `deployment_mode = "lke"` in Terraform plus the Helm chart in

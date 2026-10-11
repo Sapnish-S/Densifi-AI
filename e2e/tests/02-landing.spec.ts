@@ -80,7 +80,7 @@ test.describe("Landing", () => {
     await expect(page.getByRole("heading", { name: /Meet our two specialists/ })).toContainText(
       "that will help you through your journey.",
     )
-    await expect(page.getByText("Powered by Amazon Bedrock (Claude 4.5 Sonnet + Nova Lite).")).toBeVisible()
+    await expect(page.getByText("Powered by Amazon Bedrock (Claude Sonnet 5.5 + Nova Lite).")).toBeVisible()
 
     await expect(page.getByRole("heading", { name: "Dr. Claude" })).toBeVisible()
     await expect(page.getByText("The Clinical Pathologist")).toBeVisible()

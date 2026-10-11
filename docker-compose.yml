@@ -85,8 +85,8 @@ services:
       S3_FORCE_PATH_STYLE: "true"
       LLM_PROVIDER: ${LLM_PROVIDER:-mock}   # mock = deterministic local/E2E; set anthropic + key in .env for real AI
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      LLM_VISION_MODEL: claude-sonnet-4-5-20250929
-      LLM_FAST_MODEL: claude-haiku-4-5-20251001
+      LLM_VISION_MODEL: claude-sonnet-5-5
+      LLM_FAST_MODEL: claude-haiku-5-5
       BREVO_API_KEY: ${BREVO_API_KEY:-}
       CORS_ALLOW_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
       INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-}

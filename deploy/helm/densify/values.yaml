@@ -48,10 +48,10 @@ api:
   pdb: { minAvailable: 1 }
   env:
     # AI stays on AWS Bedrock (team decision: existing AWS credits). Switch to
-    # LLM_PROVIDER=anthropic + claude-sonnet-4-5-20250929 / claude-haiku-4-5-20251001 later.
+    # LLM_PROVIDER=anthropic + claude-sonnet-5-5 / claude-haiku-5-5 later.
     LLM_PROVIDER: bedrock
     AWS_REGION: us-east-2
-    LLM_VISION_MODEL: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+    LLM_VISION_MODEL: us.anthropic.claude-sonnet-5-5
     LLM_FAST_MODEL: us.amazon.nova-lite-v1:0
     CORS_ALLOW_ORIGINS: https://app.densify.example
     S3_REGION: us-ord

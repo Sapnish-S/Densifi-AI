@@ -198,9 +198,11 @@ resource "linode_database_postgresql_v2" "main" {
 # ── Object Storage (vault images) ────────────────────────────────────────────
 
 resource "linode_object_storage_bucket" "vault" {
-  region       = var.obj_region
-  label        = var.env == "prod" ? var.vault_bucket_label : "${var.vault_bucket_label}-${var.env}"
-  cors_enabled = true
+  region = var.obj_region
+  label  = var.env == "prod" ? var.vault_bucket_label : "${var.vault_bucket_label}-${var.env}"
+  # No CORS: the E3 endpoint (us-ord-10) supports it neither via the Linode API
+  # (cors_enabled) nor via S3 PutBucketCors (501). Browsers therefore never PUT here
+  # directly — the web app uploads server-side through /api/vault-put.
 }
 
 resource "linode_object_storage_key" "app" {
@@ -284,7 +286,8 @@ resource "linode_domain_record" "app" {
 
 # api.<domain> → the VM (or the LKE ingress NodeBalancer IP).
 resource "linode_domain_record" "api" {
-  count       = local.has_domain && local.api_ipv4 != "" ? 1 : 0
+  # count must be known at plan time: the VM's IP is not, but a VM always has one.
+  count       = local.has_domain && (local.is_vm || var.ingress_ipv4 != "") ? 1 : 0
   domain_id   = local.domain_id
   record_type = "A"
   name        = var.api_record_name

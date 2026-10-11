@@ -2,11 +2,13 @@
 LLM provider abstraction for the Densify Core Engine.
 
 Two transports: the Anthropic API (default) and AWS Bedrock's Converse API (Claude
-Sonnet 4.5 for vision/OCR, Amazon Nova Lite for JSON formatting and chat), selectable
+Sonnet 5.5 for vision/OCR, Amazon Nova Lite for JSON formatting and chat), selectable
 with LLM_PROVIDER=bedrock.
 
 Prompts, temperatures and max_tokens are passed in by analyzer.py so this module only
-owns transport.
+owns transport. Claude 5.5 models reject non-default sampling parameters, so Claude
+requests drop `temperature` (Nova still gets it) and run at low effort with extra
+max_tokens headroom, because adaptive thinking counts toward max_tokens.
 
 Error contract: providers raise ProviderError(code, message). Codes use the AWS
 error-code vocabulary, so the structured error body
@@ -19,6 +21,7 @@ from __future__ import annotations
 import base64
 import logging
 import os
+import re
 from abc import ABC, abstractmethod
 from typing import Optional
 
@@ -26,6 +29,11 @@ logger = logging.getLogger("densify.llm")
 
 # Codes the analyzer treats as recoverable (→ HTTP 503).
 RECOVERABLE_CODES = {"ThrottlingException", "ServiceUnavailableException", "TooManyRequestsException"}
+
+# Claude 5.5 thinks by default and thinking tokens count toward max_tokens; analyzer.py's
+# caps are sized for the visible reply, so Claude requests get this much on top.
+CLAUDE_EFFORT = "low"
+THINKING_HEADROOM = 2048
 
 
 class ProviderError(Exception):
@@ -80,8 +88,8 @@ class AnthropicProvider(LLMProvider):
         import anthropic
 
         self._anthropic = anthropic
-        self.vision_model_id = os.getenv("LLM_VISION_MODEL", "claude-sonnet-4-5-20250929")
-        self.fast_model_id = os.getenv("LLM_FAST_MODEL", "claude-haiku-4-5-20251001")
+        self.vision_model_id = os.getenv("LLM_VISION_MODEL", "claude-sonnet-5-5")
+        self.fast_model_id = os.getenv("LLM_FAST_MODEL", "claude-haiku-5-5")
         # boto3's default read timeout was 60 s; keep the same ceiling per attempt.
         self._client = anthropic.Anthropic(timeout=60.0)
 
@@ -89,10 +97,14 @@ class AnthropicProvider(LLMProvider):
     def _text(response) -> str:
         return " ".join(block.text for block in response.content if block.type == "text").strip()
 
-    def _create(self, **kwargs) -> str:
+    def _create(self, max_tokens: int, **kwargs) -> str:
         a = self._anthropic
         try:
-            return self._text(self._client.messages.create(**kwargs))
+            response = self._client.messages.create(
+                max_tokens=max_tokens + THINKING_HEADROOM,
+                output_config={"effort": CLAUDE_EFFORT},
+                **kwargs,
+            )
         except a.RateLimitError as exc:
             raise ProviderError("ThrottlingException", exc.message) from exc
         except a.AuthenticationError as exc:
@@ -109,6 +121,9 @@ class AnthropicProvider(LLMProvider):
             raise ProviderError("ModelErrorException", exc.message) from exc
         except a.APIConnectionError as exc:
             raise ProviderError("ServiceUnavailableException", str(exc)) from exc
+        if getattr(response, "stop_reason", None) == "refusal":
+            raise ProviderError("ValidationException", "The model declined this request.")
+        return self._text(response)
 
     def vision_compare(self, system_prompt, baseline_bytes, baseline_format, current_bytes, current_format,
                        instruction, max_tokens, temperature) -> str:
@@ -126,7 +141,6 @@ class AnthropicProvider(LLMProvider):
             model=self.vision_model_id,
             system=system_prompt,
             max_tokens=max_tokens,
-            temperature=temperature,
             messages=[{
                 "role": "user",
                 "content": [
@@ -144,7 +158,6 @@ class AnthropicProvider(LLMProvider):
             model=self.fast_model_id,
             system=system_prompt,
             max_tokens=max_tokens,
-            temperature=temperature,
             messages=[{"role": "user", "content": text}],
         )
 
@@ -153,7 +166,6 @@ class AnthropicProvider(LLMProvider):
             model=self.vision_model_id,
             system=system_prompt,
             max_tokens=max_tokens or self.LAB_DEFAULT_MAX_TOKENS,
-            temperature=temperature,
             messages=[{
                 "role": "user",
                 "content": [
@@ -175,7 +187,6 @@ class AnthropicProvider(LLMProvider):
             model=self.fast_model_id,
             system=system_prompt,
             max_tokens=max_tokens,
-            temperature=temperature,
             messages=[{"role": m["role"], "content": m["text"]} for m in messages],
         )
 
@@ -187,7 +198,7 @@ class BedrockProvider(LLMProvider):
     def __init__(self) -> None:
         import boto3
 
-        self.vision_model_id = os.getenv("LLM_VISION_MODEL", "us.anthropic.claude-sonnet-4-5-20250929-v1:0")
+        self.vision_model_id = os.getenv("LLM_VISION_MODEL", "us.anthropic.claude-sonnet-5-5")
         self.fast_model_id = os.getenv("LLM_FAST_MODEL", "us.amazon.nova-lite-v1:0")
         self._client = boto3.client(
             "bedrock-runtime",
@@ -195,6 +206,12 @@ class BedrockProvider(LLMProvider):
             aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
             aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
         )
+
+    def _claude_fields(self) -> dict:
+        # `effort` is Claude 5.x only; Sonnet 4.5 (the fallback while 5.5 access is pending) rejects it.
+        if re.search(r"claude-[a-z]+-5", self.vision_model_id):
+            return {"additionalModelRequestFields": {"output_config": {"effort": CLAUDE_EFFORT}}}
+        return {}
 
     def _converse(self, **kwargs) -> str:
         from botocore.exceptions import ClientError
@@ -219,7 +236,8 @@ class BedrockProvider(LLMProvider):
                 {"image": {"format": current_format, "source": {"bytes": current_bytes}}},
                 {"text": instruction},
             ]}],
-            inferenceConfig={"maxTokens": max_tokens, "temperature": temperature},
+            inferenceConfig={"maxTokens": max_tokens + THINKING_HEADROOM},
+            **self._claude_fields(),
         )
 
     def format_json(self, system_prompt, text, max_tokens, temperature) -> str:
@@ -231,9 +249,8 @@ class BedrockProvider(LLMProvider):
         )
 
     def extract_lab(self, system_prompt, pdf_bytes, instruction, temperature, max_tokens) -> str:
-        config: dict = {"temperature": temperature}
-        if max_tokens:
-            config["maxTokens"] = max_tokens
+        # No maxTokens → Bedrock applies the model's default max output.
+        config: dict = {"maxTokens": max_tokens + THINKING_HEADROOM} if max_tokens else {}
         return self._converse(
             modelId=self.vision_model_id,
             system=[{"text": system_prompt}],
@@ -242,6 +259,7 @@ class BedrockProvider(LLMProvider):
                 {"text": instruction},
             ]}],
             inferenceConfig=config,
+            **self._claude_fields(),
         )
 
     def chat(self, system_prompt, messages, max_tokens, temperature) -> str:

@@ -7,7 +7,7 @@ from botocore.exceptions import ClientError
 
 import analyzer
 import llm_provider
-from llm_provider import AnthropicProvider, LLMProvider, ProviderError
+from llm_provider import THINKING_HEADROOM, AnthropicProvider, LLMProvider, ProviderError
 
 pytestmark = pytest.mark.s3_bedrock
 
@@ -35,8 +35,8 @@ class FakeS3:
 
 
 class RecordingProvider(LLMProvider):
-    vision_model_id = "claude-sonnet-4-5-20250929"
-    fast_model_id = "claude-haiku-4-5-20251001"
+    vision_model_id = "claude-sonnet-5-5"
+    fast_model_id = "claude-haiku-5-5"
 
     def __init__(self, formatted='{"miniaturization_index": 0.42, "density_percentage": 58.0, "clinical_summary": "Better."}', raise_on=None):
         self.formatted, self.raise_on, self.calls = formatted, raise_on, []
@@ -90,7 +90,7 @@ def test_analyze_success_schema(client, fake_s3, provider):
     assert res.json() == {
         "miniaturization_index": 0.42, "density_percentage": 58.0, "clinical_summary": "Better.",
         "raw_vision_output": "Raw clinical text.",
-        "model_chain": ["claude-sonnet-4-5-20250929", "claude-haiku-4-5-20251001"],
+        "model_chain": ["claude-sonnet-5-5", "claude-haiku-5-5"],
     }
     vision = provider.calls[0]
     assert vision[1][0] == analyzer.CLAUDE_SYSTEM_PROMPT
@@ -276,8 +276,9 @@ def test_anthropic_vision_request(anthropic_provider):
     out = p.vision_compare("SYS", b"\x89PNG", "png", b"\xff\xd8", "jpeg", "INSTR", max_tokens=1024, temperature=0.1)
     assert out == "part one part two"
     kw = fake.kwargs[0]
-    assert kw["model"] == "claude-sonnet-4-5-20250929"
-    assert (kw["system"], kw["max_tokens"], kw["temperature"]) == ("SYS", 1024, 0.1)
+    assert kw["model"] == "claude-sonnet-5-5"
+    assert (kw["system"], kw["max_tokens"], kw["output_config"]) == ("SYS", 1024 + THINKING_HEADROOM, {"effort": "low"})
+    assert "temperature" not in kw  # Claude 5.5 rejects non-default sampling params
     content = kw["messages"][0]["content"]
     assert [c["type"] for c in content] == ["text", "image", "text", "image", "text"]
     assert content[0]["text"] == "Image 1: Baseline (Day 1)" and content[2]["text"] == "Image 2: Current (Latest Progress)"
@@ -291,10 +292,11 @@ def test_anthropic_formatter_chat_and_lab_requests(anthropic_provider):
     p.chat("CHAT", [{"role": "user", "text": "a"}, {"role": "assistant", "text": "b"}, {"role": "user", "text": "c"}], 256, 0.5)
     p.extract_lab("LAB", b"%PDF", "INSTR", temperature=0.0, max_tokens=None)
     fmt, chat, lab = fake.kwargs
-    assert (fmt["model"], fmt["max_tokens"], fmt["temperature"]) == ("claude-haiku-4-5-20251001", 512, 0.0)
-    assert chat["model"] == "claude-haiku-4-5-20251001" and chat["max_tokens"] == 256 and chat["temperature"] == 0.5
+    assert (fmt["model"], fmt["max_tokens"]) == ("claude-haiku-5-5", 512 + THINKING_HEADROOM)
+    assert chat["model"] == "claude-haiku-5-5" and chat["max_tokens"] == 256 + THINKING_HEADROOM
     assert chat["messages"] == [{"role": "user", "content": "a"}, {"role": "assistant", "content": "b"}, {"role": "user", "content": "c"}]
-    assert lab["model"] == "claude-sonnet-4-5-20250929" and lab["max_tokens"] == 4096 and lab["temperature"] == 0.0
+    assert lab["model"] == "claude-sonnet-5-5" and lab["max_tokens"] == 4096 + THINKING_HEADROOM
+    assert all("temperature" not in kw for kw in fake.kwargs)
     doc = lab["messages"][0]["content"][0]
     assert doc == {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": base64.b64encode(b"%PDF").decode()}}
 
@@ -338,18 +340,28 @@ def test_bedrock_request_shape(bedrock_provider):
     p.extract_lab("LAB", b"%PDF", "INSTR", 0.0, None)
     p.chat("CHAT", [{"role": "user", "text": "hi"}], 256, 0.5)
     vision, fmt, lab, chat = fake.kwargs
-    assert vision["modelId"] == "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+    assert vision["modelId"] == "us.anthropic.claude-sonnet-5-5"
     assert vision["system"] == [{"text": "SYS"}]
     assert vision["messages"][0]["content"] == [
         {"text": "Image 1: Baseline (Day 1)"}, {"image": {"format": "png", "source": {"bytes": b"1"}}},
         {"text": "Image 2: Current (Latest Progress)"}, {"image": {"format": "jpeg", "source": {"bytes": b"2"}}},
         {"text": "INSTR"},
     ]
-    assert vision["inferenceConfig"] == {"maxTokens": 1024, "temperature": 0.1}
+    assert vision["inferenceConfig"] == {"maxTokens": 1024 + THINKING_HEADROOM}
+    assert vision["additionalModelRequestFields"] == {"output_config": {"effort": "low"}}
     assert fmt["modelId"] == "us.amazon.nova-lite-v1:0" and fmt["inferenceConfig"] == {"maxTokens": 512, "temperature": 0.0}
     assert lab["messages"][0]["content"][0] == {"document": {"name": "report", "format": "pdf", "source": {"bytes": b"%PDF"}}}
-    assert lab["inferenceConfig"] == {"temperature": 0.0}  # Bedrock default max tokens
+    assert lab["inferenceConfig"] == {}  # Bedrock default max tokens
     assert chat["modelId"] == "us.amazon.nova-lite-v1:0" and chat["inferenceConfig"] == {"maxTokens": 256, "temperature": 0.5}
+
+
+def test_bedrock_sonnet_4_5_omits_effort(monkeypatch):
+    monkeypatch.setenv("LLM_VISION_MODEL", "us.anthropic.claude-sonnet-4-5-20250929-v1:0")
+    p = llm_provider.BedrockProvider()
+    p._client = fake = FakeBedrock()
+    p.vision_compare("SYS", b"1", "png", b"2", "jpeg", "INSTR", 1024, 0.1)
+    p.extract_lab("LAB", b"%PDF", "INSTR", 0.0, None)
+    assert all("additionalModelRequestFields" not in kw for kw in fake.kwargs)
 
 
 def test_bedrock_client_error_maps_to_structured_error(client, fake_s3, bedrock_provider):

@@ -131,17 +131,17 @@ test.describe("Vault archive", () => {
 })
 
 /** Open "Add This Month", pick a PNG for Front via the device-upload button, and wait
- *  through the 2.5 s validation overlay. Returns the presigned PUT the browser issued. */
-async function uploadFrontFromDevice(page: Page, userId: string) {
+ *  through the 2.5 s validation overlay. Returns the server-side upload request the browser issued
+ *  (Akamai's E3 Object Storage has no CORS, so the app uploads through /api/vault-put). */
+async function uploadFrontFromDevice(page: Page) {
   await page.getByRole("button", { name: "Add This Month" }).click()
   await expect(captureDialog(page)).toBeVisible()
-  // Hold the S3 PUT briefly so the transient "Uploading to vault..." state is observable.
-  await page.route(`${S3_BASE}/**`, async (route) => {
-    if (route.request().method() === "PUT") await new Promise((r) => setTimeout(r, 800))
+  // Hold the upload briefly so the transient "Uploading to vault..." state is observable.
+  await page.route("**/api/vault-put?*", async (route) => {
+    await new Promise((r) => setTimeout(r, 800))
     await route.continue()
   })
-  const signReq = page.waitForRequest((r) => r.method() === "POST" && r.url().endsWith("/api/vault-upload"))
-  const putReq = page.waitForRequest((r) => r.method() === "PUT" && r.url().startsWith(`${S3_BASE}/vault/${userId}/`))
+  const putReq = page.waitForRequest((r) => r.method() === "POST" && r.url().includes("/api/vault-put?"))
 
   const chooserP = page.waitForEvent("filechooser")
   await captureRow(page, "Front").getByTitle("Upload from device").click()
@@ -156,10 +156,9 @@ async function uploadFrontFromDevice(page: Page, userId: string) {
   await expect(overlay).toBeHidden({ timeout: 5_000 })
   await expect(captureRow(page, "Front")).toContainText("Uploading to vault...")
 
-  expect((await signReq).postDataJSON()).toEqual({ view: "Front", contentType: "image/png" })
   const put = await putReq
   expect(put.headers()["content-type"]).toBe("image/png")
-  expect(put.url()).toMatch(new RegExp(`^${S3_BASE}/vault/${userId}/${utcMonth()}/Front/${UUID}\\.png\\?.*X-Amz-Signature=`))
+  expect(new URL(put.url()).searchParams.get("view")).toBe("Front")
   return put
 }
 
@@ -184,7 +183,7 @@ test.describe("Direct Capture dialog", () => {
     await dlg.getByRole("button", { name: "Done" }).click()
     await expect(dlg).toBeHidden()
 
-    await uploadFrontFromDevice(page, user.id)
+    await uploadFrontFromDevice(page)
     // Terminal state (success is covered by the fixme'd round-trip test below).
     await expect(captureRow(page, "Front")).toContainText(/Captured & uploaded|Upload failed — tap to retry/, { timeout: 15_000 })
 
@@ -203,7 +202,7 @@ test.describe("Direct Capture dialog", () => {
   test("upload from device round-trip: S3 object public-read + progress_photo row", async ({ page }) => {
     const user = await createUser(page)
     await openView(page, "vault")
-    await uploadFrontFromDevice(page, user.id)
+    await uploadFrontFromDevice(page)
     await expect(captureRow(page, "Front")).toContainText("Captured & uploaded", { timeout: 15_000 })
     await expect(captureRow(page, "Front").getByTitle("Upload from device")).toHaveCount(0)
 

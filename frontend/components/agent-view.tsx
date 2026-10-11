@@ -249,7 +249,7 @@ export function AgentView({
           <div className="border-b border-border/40 px-5 py-4">
             <p className="text-[9px] font-semibold tracking-[0.2em] uppercase text-muted-foreground mb-1">AI Analysis Module</p>
             <h2 className="text-base font-semibold tracking-tight">Hair Analysis Agent</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">AI-powered visual comparison via Amazon Bedrock (Claude 4.5 Sonnet + Nova Lite).</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">AI-powered visual comparison via Amazon Bedrock (Claude Sonnet 5.5 + Nova Lite).</p>
           </div>
           <div className="px-5 py-4 flex flex-col sm:flex-row items-start sm:items-center gap-4">
             <div className="flex-1">

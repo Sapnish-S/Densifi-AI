@@ -10,7 +10,7 @@
 KEY="$(ssh_key)"
 HOST_IP="$(tf_out api_host_ipv4)"
 API_HOSTNAME="$(tf_out api_hostname)"
-[ -n "$HOST_IP" ] || { echo "no api_host_ipv4 output — run deploy/provision.sh apply --yes first" >&2; exit 1; }
+[[ "$HOST_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "no api_host_ipv4 output — run deploy/provision.sh apply --yes first" >&2; exit 1; }
 SSH=(ssh -i "$KEY" -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$SECRETS/known_hosts" "root@$HOST_IP")
 
 STAGE="$(mktemp -d)"; trap 'rm -rf "$STAGE"' EXIT
@@ -29,6 +29,8 @@ DB_HOST="$(tf_out db_host)"; DB_PORT="$(tf_out db_port)"
 DB_NAME="${DB_NAME:-defaultdb}"  # TODO(🔎 VERIFY): default database name on Akamai Managed PostgreSQL
 ENC_PASS="$(py -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$DB_PASS")"
 
+# LLM_VISION_MODEL: Sonnet 4.5 until Bedrock grants this account Sonnet 5.5
+# (then switch to us.anthropic.claude-sonnet-5-5; no code change needed).
 umask 077
 cat > "$STAGE/.env" <<ENV
 API_HOSTNAME=$API_HOSTNAME
@@ -56,7 +58,9 @@ echo "== waiting for cloud-init on $HOST_IP"
 "${SSH[@]}" "cloud-init status --wait >/dev/null; test -f /var/lib/cloud/densify-ready"
 
 echo "== uploading release"
-tar -C "$STAGE" -czf - . | "${SSH[@]}" "mkdir -p /opt/densify && tar -xzf - -C /opt/densify && chmod 600 /opt/densify/.env"
+# Windows/Git Bash tar records files as 0600 under the local UID; normalise on the VM so the
+# api image's non-root user can read the copied sources and the bind-mounted pg-ca.crt.
+tar -C "$STAGE" -czf - . |"${SSH[@]}" "mkdir -p /opt/densify && tar -xzf - -C /opt/densify --no-same-owner && chown -R root:root /opt/densify && chmod -R u=rwX,go=rX /opt/densify && chmod 600 /opt/densify/.env"
 
 echo "== schema + start"
 "${SSH[@]}" "cd /opt/densify && docker compose --profile schema run --rm schema && docker compose up -d --build --remove-orphans && docker image prune -f >/dev/null"

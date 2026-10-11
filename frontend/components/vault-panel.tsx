@@ -11,6 +11,29 @@ import { BiometricScanner, type CaptureView } from "@/components/biometric-scann
 import { getVaultMonths, type VaultMonth, type VaultPhoto } from "@/app/actions/telemetry"
 import { getS3Url } from "@/lib/s3"
 
+// Uploads go through /api/vault-put, and Vercel caps request bodies at 4.5 MB.
+// Larger images are scaled down and re-encoded as JPEG to fit under the cap.
+const MAX_UPLOAD_BYTES = 4_000_000
+
+async function fitForUpload(blob: Blob, contentType: string): Promise<{ blob: Blob; contentType: string }> {
+  if (blob.size <= MAX_UPLOAD_BYTES) return { blob, contentType }
+  const bitmap = await createImageBitmap(blob)
+  for (const maxSide of [3072, 2048, 1600]) {
+    const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height))
+    const canvas = document.createElement("canvas")
+    canvas.width = Math.round(bitmap.width * scale)
+    canvas.height = Math.round(bitmap.height * scale)
+    canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+    const jpeg = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9))
+    if (jpeg && jpeg.size <= MAX_UPLOAD_BYTES) {
+      bitmap.close()
+      return { blob: jpeg, contentType: "image/jpeg" }
+    }
+  }
+  bitmap.close()
+  throw new Error("Image too large to upload")
+}
+
 function AlignmentOverlay() {
   return (
     <div className="pointer-events-none absolute inset-0" aria-hidden="true">
@@ -169,20 +192,16 @@ export function VaultPanel({
     setScannerView(null)
     setUploading((prev) => ({ ...prev, [view]: "uploading" }))
     try {
-      const res = await fetch("/api/vault-upload", {
+      // Server-side upload: Akamai's E3 Object Storage endpoint has no CORS support,
+      // so the browser can't PUT to a presigned URL directly.
+      const upload = await fitForUpload(blob, contentType)
+      const put = await fetch(`/api/vault-put?view=${encodeURIComponent(view)}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ view, contentType }),
+        headers: { "Content-Type": upload.contentType },
+        body: upload.blob,
       })
-      if (!res.ok) throw new Error("Failed to get upload URL")
-      const { uploadUrl, key } = await res.json()
-
-      const put = await fetch(uploadUrl, {
-        method: "PUT",
-        headers: { "Content-Type": contentType },
-        body: blob,
-      })
-      if (!put.ok) throw new Error("S3 upload failed")
+      if (!put.ok) throw new Error("Vault upload failed")
+      const { key } = await put.json()
 
       const save = await fetch("/api/vault-save", {
         method: "POST",

@@ -112,7 +112,7 @@ variable "vault_public_read" {
 }
 
 variable "app_origins" {
-  description = "Origins allowed to PUT to the vault bucket via presigned URLs (CORS)."
+  description = "Web app origins. Unused while the vault bucket is on an E3 endpoint (no CORS support)."
   type        = list(string)
 }
 
