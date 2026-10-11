@@ -16,8 +16,6 @@ async function getUserId(): Promise<string> {
 
 export async function getProfile() {
   const userId = await getUserId()
-  // Ensure gender column exists
-  await query(`ALTER TABLE profile ADD COLUMN IF NOT EXISTS gender TEXT DEFAULT 'male'`)
   const res = await query(
     `SELECT p.id, p."userId", p.tier, p."displayName", p.gender, p."createdAt", COALESCE(u.role, 'patient') as role 
      FROM profile p 
@@ -65,7 +63,6 @@ export async function switchUserRole(newRole: "patient" | "doctor") {
 
 export async function updateProfile(data: { displayName?: string; gender?: "male" | "female" }) {
   const userId = await getUserId()
-  await query(`ALTER TABLE profile ADD COLUMN IF NOT EXISTS gender TEXT DEFAULT 'male'`)
   await query(
     `UPDATE profile SET 
        "displayName" = COALESCE($1, "displayName"), 

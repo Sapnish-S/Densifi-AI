@@ -24,9 +24,6 @@ export async function getLabReports() {
   const userId = await getUserId()
   await requirePremium(userId)
   
-  // Ensure the DB has the correct schema (will be ignored if it exists)
-  await query(`ALTER TABLE lab_report ADD COLUMN IF NOT EXISTS dht NUMERIC, ADD COLUMN IF NOT EXISTS "freeT" NUMERIC, ADD COLUMN IF NOT EXISTS ferritin NUMERIC`);
-
   const res = await query(
     `SELECT id, label AS title, "reportDate" AS "uploadedAt", dht, "freeT", ferritin FROM lab_report WHERE "userId" = $1 ORDER BY "reportDate" DESC`,
     [userId],
